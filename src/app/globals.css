@@ -77,3 +77,13 @@ main:has(.app-shell) { max-width: 1180px; }
 td input { width: 6.5rem; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 h2 { margin-top: 32px; }
+
+/* Admin */
+.admin-bar { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; border: 1px solid var(--line); border-left: 4px solid #b7791f; border-radius: 6px; padding: 8px 12px; margin-bottom: 16px; background: var(--card); font-size: 0.9rem; }
+.admin-bar.editing { border-left-color: var(--danger); }
+.admin-bar summary { cursor: pointer; color: var(--accent); }
+.admin-bar details form { margin-top: 8px; }
+.bar { display: block; height: 10px; min-width: 2px; background: var(--accent); border-radius: 0 4px 4px 0; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+tfoot th { border-top: 2px solid var(--line); }
+main:has(.admin-title) { max-width: 1280px; }

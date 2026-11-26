@@ -14,6 +14,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         <Field label="Password"><input name="password" type="password" required autoComplete="current-password" /></Field>
         <button type="submit">Sign in</button>
         <p className="small muted">New company? <a href="/signup">Set up your company</a></p>
+        <p className="small muted">White Oak staff: <a href="/admin/setup">create your admin login</a></p>
       </form>
     </>
   );

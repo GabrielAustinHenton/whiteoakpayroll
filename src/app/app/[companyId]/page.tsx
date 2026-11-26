@@ -1,10 +1,11 @@
 import { db } from "@/lib/db";
 import { canUse, requireArea } from "@/lib/auth/session";
-import { prettyDate, usd } from "@/components/ui";
+import { Notice, messages, prettyDate, usd } from "@/components/ui";
 import { refreshInvoice } from "@/lib/app/payroll-service";
 
-export default async function Overview({ params }: { params: Promise<{ companyId: string }> }) {
+export default async function Overview({ params, searchParams }: { params: Promise<{ companyId: string }>; searchParams: Promise<Record<string, string>> }) {
   const { companyId } = await params;
+  const { error, ok } = await messages(searchParams);
   const { role } = await requireArea(companyId, "dashboard");
   const c = await db.company.findUniqueOrThrow({
     where: { id: companyId },
@@ -34,6 +35,7 @@ export default async function Overview({ params }: { params: Promise<{ companyId
   return (
     <>
       <h1>{c.tradeName ?? c.legalName}</h1>
+      <Notice error={error} ok={ok} />
       <p className="muted">EIN {c.ein} · {c.city}, {c.state}</p>
       <div className="stats">
         <div className="stat"><b>{active}</b>active employees</div>

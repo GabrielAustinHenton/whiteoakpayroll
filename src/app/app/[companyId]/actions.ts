@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { canUse, requireArea } from "@/lib/auth/session";
+import { canUse, requireWrite } from "@/lib/auth/session";
 import type { Role } from "@prisma/client";
 import { ensurePortalInvite, inviteTeammateLogin, resendInvite } from "@/lib/app/invites";
 import { normalizeEin, normalizeSsn } from "@/lib/app/ids";
@@ -46,7 +46,7 @@ async function portalNote(e: Parameters<typeof ensurePortalInvite>[0]) {
 
 export async function updateCompany(form: FormData) {
   const companyId = id(form);
-  const { user } = await requireArea(companyId, "settings");
+  const { user } = await requireWrite(companyId, "settings");
   const ein = normalizeEin(str(form.get("ein")));
   if (ein.error) go(`/app/${companyId}/settings`, { error: ein.error });
   await db.company.update({
@@ -68,7 +68,7 @@ export async function updateCompany(form: FormData) {
 
 export async function updateBank(form: FormData) {
   const companyId = id(form);
-  const { user } = await requireArea(companyId, "settings");
+  const { user } = await requireWrite(companyId, "settings");
   const routing = str(form.get("routing")).replace(/\D/g, "");
   const account = str(form.get("account")).replace(/\D/g, "");
   if (routing.length !== 9 || account.length < 4) go(`/app/${companyId}/settings`, { error: "Routing number is 9 digits; account number at least 4." });
@@ -80,7 +80,7 @@ export async function updateBank(form: FormData) {
 
 export async function upsertStateAccount(form: FormData) {
   const companyId = id(form);
-  const { user } = await requireArea(companyId, "settings");
+  const { user } = await requireWrite(companyId, "settings");
   const state = str(form.get("state"));
   if (!LAUNCH.includes(state)) go(`/app/${companyId}/settings`, { error: "Choose CT, MA, OR or NY." });
   const ratePct = Number(str(form.get("suiRatePct")));
@@ -100,7 +100,7 @@ export async function upsertStateAccount(form: FormData) {
 
 export async function createSchedule(form: FormData) {
   const companyId = id(form);
-  const { user } = await requireArea(companyId, "settings");
+  const { user } = await requireWrite(companyId, "settings");
   const frequency = str(form.get("frequency")) as Frequency;
   const anchor = str(form.get("anchorPayday"));
   if (!["WEEKLY", "BIWEEKLY", "SEMIMONTHLY", "MONTHLY"].includes(frequency) || !/^\d{4}-\d{2}-\d{2}$/.test(anchor))
@@ -186,7 +186,7 @@ const statusFor = (f: { i9CompletedAt: Date | null }) => (f.i9CompletedAt ? "ACT
 
 export async function createEmployee(form: FormData) {
   const companyId = id(form);
-  const { user, role } = await requireArea(companyId, "people");
+  const { user, role } = await requireWrite(companyId, "people");
   const back = `/app/${companyId}/people/new`;
   const ssn = normalizeSsn(str(form.get("ssn")));
   if (ssn.error) go(back, { error: ssn.error });
@@ -203,7 +203,7 @@ export async function createEmployee(form: FormData) {
 
 export async function updateEmployee(form: FormData) {
   const companyId = id(form);
-  const { user } = await requireArea(companyId, "people");
+  const { user } = await requireWrite(companyId, "people");
   const employeeId = str(form.get("employeeId"));
   const back = `/app/${companyId}/people/${employeeId}`;
   const existing = await db.employee.findFirstOrThrow({ where: { id: employeeId, companyId } });
@@ -230,7 +230,7 @@ export async function updateEmployee(form: FormData) {
 
 export async function terminateEmployee(form: FormData) {
   const companyId = id(form);
-  const { user, role } = await requireArea(companyId, "people");
+  const { user, role } = await requireWrite(companyId, "people");
   const employeeId = str(form.get("employeeId"));
   const date = str(form.get("terminationDate"));
   await db.employee.update({
@@ -246,7 +246,7 @@ export async function terminateEmployee(form: FormData) {
 
 export async function rehireEmployee(form: FormData) {
   const companyId = id(form);
-  const { role } = await requireArea(companyId, "people");
+  const { role } = await requireWrite(companyId, "people");
   const employeeId = str(form.get("employeeId"));
   await db.employee.update({ where: { id: employeeId, companyId }, data: { status: "ONBOARDING", terminationDate: null, terminationReason: null, i9CompletedAt: null } });
   go(`/app/${companyId}/people/${employeeId}`, { ok: `Rehired. Complete a new I-9 if they left more than 3 years ago.${await feeNote(companyId, role)}` });
@@ -255,7 +255,7 @@ export async function rehireEmployee(form: FormData) {
 /** Send a pending portal invite again with a fresh link (for a lost or expired email). */
 export async function resendPortalInvite(form: FormData) {
   const companyId = id(form);
-  const { user } = await requireArea(companyId, "people");
+  const { user } = await requireWrite(companyId, "people");
   const employeeId = str(form.get("employeeId"));
   const e = await db.employee.findFirstOrThrow({ where: { id: employeeId, companyId } });
   const back = `/app/${companyId}/people/${employeeId}`;
@@ -267,7 +267,7 @@ export async function resendPortalInvite(form: FormData) {
 
 export async function createContractor(form: FormData) {
   const companyId = id(form);
-  const { user, role } = await requireArea(companyId, "people");
+  const { user, role } = await requireWrite(companyId, "people");
   const back = `/app/${companyId}/people/contractors/new`;
   const tinType = str(form.get("tinType")) === "ein" ? "ein" : "ssn";
   const tin = tinType === "ein" ? normalizeEin(str(form.get("tin"))) : normalizeSsn(str(form.get("tin")));
@@ -297,7 +297,7 @@ export async function createContractor(form: FormData) {
 
 export async function setContractorStatus(form: FormData) {
   const companyId = id(form);
-  const { role } = await requireArea(companyId, "people");
+  const { role } = await requireWrite(companyId, "people");
   const status = str(form.get("status")) === "TERMINATED" ? "TERMINATED" : "ACTIVE";
   await db.contractor.update({ where: { id: str(form.get("contractorId")), companyId }, data: { status } });
   const fee = await feeNote(companyId, role);
@@ -308,7 +308,7 @@ export async function setContractorStatus(form: FormData) {
 
 export async function startPayRun(form: FormData) {
   const companyId = id(form);
-  await requireArea(companyId, "payroll");
+  await requireWrite(companyId, "payroll");
   const c = await db.company.findUniqueOrThrow({ where: { id: companyId }, include: { stateAccounts: true } });
   if (!c.bankLast4) go(`/app/${companyId}/payroll`, { error: "Add the funding bank account in Company settings first." });
   const states = await db.employee.findMany({ where: { companyId, status: { not: "TERMINATED" } }, distinct: ["workState"], select: { workState: true } });
@@ -320,7 +320,7 @@ export async function startPayRun(form: FormData) {
 
 export async function saveRunInputs(form: FormData) {
   const companyId = id(form);
-  await requireArea(companyId, "payroll");
+  await requireWrite(companyId, "payroll");
   const payRunId = str(form.get("payRunId"));
   const run = await db.payRun.findFirstOrThrow({ where: { id: payRunId, companyId }, include: { lines: true } });
   if (run.status !== "DRAFT") go(`/app/${companyId}/payroll/${payRunId}`, { error: "This pay run is already approved." });
@@ -347,7 +347,7 @@ export async function saveRunInputs(form: FormData) {
 
 export async function removeContractorPayment(form: FormData) {
   const companyId = id(form);
-  await requireArea(companyId, "payroll");
+  await requireWrite(companyId, "payroll");
   const payRunId = str(form.get("payRunId"));
   await db.contractorPayment.deleteMany({ where: { id: str(form.get("paymentId")), payRunId, payRun: { status: "DRAFT", companyId } } });
   await recalculate(payRunId);
@@ -356,7 +356,7 @@ export async function removeContractorPayment(form: FormData) {
 
 export async function approveRun(form: FormData) {
   const companyId = id(form);
-  const { user } = await requireArea(companyId, "payroll");
+  const { user } = await requireWrite(companyId, "payroll");
   const payRunId = str(form.get("payRunId"));
   if (form.get("confirm") !== "on") go(`/app/${companyId}/payroll/${payRunId}`, { error: "Tick the box to confirm the totals." });
   await db.payRun.findFirstOrThrow({ where: { id: payRunId, companyId } });
@@ -370,7 +370,7 @@ export async function approveRun(form: FormData) {
 
 export async function voidOrReissueCheck(form: FormData) {
   const companyId = id(form);
-  const { user } = await requireArea(companyId, "payroll");
+  const { user } = await requireWrite(companyId, "payroll");
   const payRunId = str(form.get("payRunId"));
   const reissue = str(form.get("mode")) === "reissue";
   try {
@@ -384,7 +384,7 @@ export async function voidOrReissueCheck(form: FormData) {
 
 export async function setNextCheckNumber(form: FormData) {
   const companyId = id(form);
-  await requireArea(companyId, "settings");
+  await requireWrite(companyId, "settings");
   const n = Number(str(form.get("nextCheckNumber")));
   if (!Number.isInteger(n) || n < 1) go(`/app/${companyId}/settings`, { error: "Check number must be a whole number." });
   const used = await db.check.findFirst({ where: { companyId, number: { gte: n } } });
@@ -395,7 +395,7 @@ export async function setNextCheckNumber(form: FormData) {
 
 export async function deleteDraftRun(form: FormData) {
   const companyId = id(form);
-  await requireArea(companyId, "payroll");
+  await requireWrite(companyId, "payroll");
   await db.payRun.deleteMany({ where: { id: str(form.get("payRunId")), companyId, status: "DRAFT" } });
   go(`/app/${companyId}/payroll`, { ok: "Draft deleted." });
 }
@@ -404,7 +404,7 @@ export async function deleteDraftRun(form: FormData) {
 
 export async function generate(form: FormData) {
   const companyId = id(form);
-  const { user } = await requireArea(companyId, "filings");
+  const { user } = await requireWrite(companyId, "filings");
   const period = str(form.get("period"));
   try {
     const count = await generateFilings(companyId, period, user.id);
@@ -417,7 +417,7 @@ export async function generate(form: FormData) {
 
 export async function markFiled(form: FormData) {
   const companyId = id(form);
-  const { user } = await requireArea(companyId, "filings");
+  const { user } = await requireWrite(companyId, "filings");
   await db.filing.update({ where: { id: str(form.get("filingId")), companyId }, data: { status: "filed", filedAt: new Date() } });
   await audit(user.id, companyId, "filing.marked_filed", { filingId: str(form.get("filingId")) });
   revalidatePath(`/app/${companyId}/filings`);
@@ -427,7 +427,7 @@ export async function markFiled(form: FormData) {
 
 export async function decideAdvance(form: FormData) {
   const companyId = id(form);
-  const { user } = await requireArea(companyId, "advances");
+  const { user } = await requireWrite(companyId, "advances");
   const advanceId = str(form.get("advanceId"));
   const approve = str(form.get("decision")) === "approve";
   const a = await db.advance.findFirstOrThrow({ where: { id: advanceId, employee: { companyId } }, include: { employee: true } });
@@ -442,7 +442,7 @@ export async function decideAdvance(form: FormData) {
 
 export async function toggleAddOn(form: FormData) {
   const companyId = id(form);
-  const { user } = await requireArea(companyId, "billing");
+  const { user } = await requireWrite(companyId, "billing");
   const addOn = str(form.get("addOn")) === "PTO" ? "PTO" : "TIME_TRACKING";
   const existing = await db.companyModule.findUnique({ where: { companyId_addOn: { companyId, addOn } } });
   if (existing) await db.companyModule.delete({ where: { id: existing.id } });
@@ -456,7 +456,7 @@ export async function toggleAddOn(form: FormData) {
 
 export async function inviteTeammate(form: FormData) {
   const companyId = id(form);
-  const { user } = await requireArea(companyId, "team");
+  const { user } = await requireWrite(companyId, "team");
   const back = `/app/${companyId}/team`;
   const email = str(form.get("email")).toLowerCase();
   const role = str(form.get("role")) === "CLIENT_OWNER" ? "CLIENT_OWNER" : "CLIENT_HR";
@@ -468,7 +468,7 @@ export async function inviteTeammate(form: FormData) {
 
 export async function removeTeammate(form: FormData) {
   const companyId = id(form);
-  const { user } = await requireArea(companyId, "team");
+  const { user } = await requireWrite(companyId, "team");
   const membershipId = str(form.get("membershipId"));
   const m = await db.membership.findFirstOrThrow({ where: { id: membershipId, companyId } });
   if (m.userId === user.id) go(`/app/${companyId}/team`, { error: "You can't remove yourself." });

@@ -1,8 +1,9 @@
 import { createHash, randomBytes } from "node:crypto";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import type { Role } from "@prisma/client";
 import { db } from "../db";
+import { adminAllowed } from "./admins";
 
 const COOKIE = "wo_session";
 const DAYS = 14;
@@ -35,7 +36,8 @@ export async function currentUser() {
   if (!token) return null;
   const s = await db.session.findUnique({ where: { tokenHash: sha256(token) }, include: { user: { include: { memberships: true } } } });
   if (!s || s.expiresAt < new Date()) return null;
-  return s.user;
+  // ADMIN_EMAILS, when set, is the allowlist: removing an email there revokes admin access at once.
+  return { ...s.user, isPlatformAdmin: s.user.isPlatformAdmin && adminAllowed(s.user.email) };
 }
 
 export type CurrentUser = NonNullable<Awaited<ReturnType<typeof currentUser>>>;
@@ -56,10 +58,15 @@ const AREAS: Record<Exclude<Role, "PLATFORM_ADMIN">, Area[]> = {
   EMPLOYEE: [],
 };
 
-/** The caller's role in a company: PLATFORM_ADMIN for White Oak staff, else their membership role. */
+/**
+ * The caller's role in a company. An owner or HR membership wins (an admin who also runs a company
+ * uses it as its owner); otherwise White Oak staff get PLATFORM_ADMIN; else the membership role.
+ */
 export function roleIn(user: CurrentUser, companyId: string): Role | null {
+  const m = user.memberships.find((x) => x.companyId === companyId)?.role ?? null;
+  if (m === "CLIENT_OWNER" || m === "CLIENT_HR") return m;
   if (user.isPlatformAdmin) return "PLATFORM_ADMIN";
-  return user.memberships.find((m) => m.companyId === companyId)?.role ?? null;
+  return m;
 }
 
 export function canUse(role: Role | null, area: Area): boolean {
@@ -74,4 +81,55 @@ export async function requireArea(companyId: string, area: Area) {
   const role = roleIn(user, companyId);
   if (!canUse(role, area)) redirect(role ? `/app/${companyId}` : "/app");
   return { user, role: role! };
+}
+
+const EDIT_COOKIE = "wo_admin_edit";
+
+/** The company a White Oak admin has unlocked for changes this session, if any. */
+export async function adminEditingCompany(): Promise<string | null> {
+  return (await cookies()).get(EDIT_COOKIE)?.value ?? null;
+}
+
+/** Unlock (companyId) or relock (null) changes for an admin, for one hour at most. */
+export async function setAdminEditing(companyId: string | null) {
+  const jar = await cookies();
+  if (!companyId) return jar.delete(EDIT_COOKIE);
+  jar.set(EDIT_COOKIE, companyId, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+    maxAge: 3600,
+  });
+}
+
+/** The page the request came from, when it is inside this company's app; else its overview. */
+export async function sameCompanyReferer(companyId: string): Promise<string> {
+  const fallback = `/app/${companyId}`;
+  try {
+    const path = new URL((await headers()).get("referer") ?? "").pathname;
+    return path.startsWith(`${fallback}/`) || path === fallback ? path : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * Gate an action that changes a company. Same as requireArea, except White Oak admins are
+ * read-only unless they unlocked changes for this company (audited) from the admin banner.
+ */
+export async function requireWrite(companyId: string, area: Area) {
+  const r = await requireArea(companyId, area);
+  if (r.role === "PLATFORM_ADMIN" && (await adminEditingCompany()) !== companyId) {
+    const back = await sameCompanyReferer(companyId);
+    redirect(`${back}?error=${encodeURIComponent("You are viewing this company read-only. Turn on edit mode in the admin bar to make changes.")}`);
+  }
+  return r;
+}
+
+/** Gate a White Oak admin page. */
+export async function requireAdmin(): Promise<CurrentUser> {
+  const user = await requireUser();
+  if (!user.isPlatformAdmin) redirect("/admin/claim");
+  return user;
 }
