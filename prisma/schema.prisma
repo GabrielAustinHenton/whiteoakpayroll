@@ -1,0 +1,265 @@
+// White Oak Payroll data model. Money is stored as integer cents.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  PLATFORM_ADMIN
+  PAYROLL_ADMIN
+  CLIENT_HR // limited: onboard and offboard employees only
+  EMPLOYEE
+  CONTRACTOR
+}
+
+enum PayFrequency {
+  WEEKLY
+  BIWEEKLY
+  SEMIMONTHLY
+  MONTHLY
+}
+
+enum PayBasis {
+  HOURLY
+  SALARIED
+}
+
+enum WorkerStatus {
+  ONBOARDING
+  ACTIVE
+  TERMINATED
+}
+
+enum PayRunStatus {
+  DRAFT
+  PREVIEWED
+  APPROVED
+  PAID
+  FAILED
+}
+
+enum AddOn {
+  TIME_TRACKING
+  PTO
+}
+
+model Company {
+  id                 String          @id @default(cuid())
+  legalName          String
+  ein                String          @unique
+  providerCompanyId  String?         @unique
+  createdAt          DateTime        @default(now())
+  stateAccounts      StateAccount[]
+  memberships        Membership[]
+  paySchedules       PaySchedule[]
+  employees          Employee[]
+  contractors        Contractor[]
+  payRuns            PayRun[]
+  modules            CompanyModule[]
+  filings            Filing[]
+  retirementSettings RetirementSetting[]
+}
+
+model StateAccount {
+  id                 String  @id @default(cuid())
+  companyId          String
+  company            Company @relation(fields: [companyId], references: [id])
+  state              String // CT, MA, OR, NY
+  withholdingAccount String?
+  unemploymentAccount String?
+  sutaRate           Float
+  sutaWageBaseCents  Int
+  /** Uploaded state approval for less frequent pay (CT monthly/semi-monthly). */
+  lessFrequentPayApproval Boolean @default(false)
+
+  @@unique([companyId, state])
+}
+
+model User {
+  id          String       @id @default(cuid())
+  email       String       @unique
+  mfaEnabled  Boolean      @default(false)
+  memberships Membership[]
+}
+
+model Membership {
+  id        String  @id @default(cuid())
+  userId    String
+  user      User    @relation(fields: [userId], references: [id])
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+  role      Role
+
+  @@unique([userId, companyId])
+}
+
+model CompanyModule {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+  addOn     AddOn
+  enabledAt DateTime @default(now())
+
+  @@unique([companyId, addOn])
+}
+
+model PaySchedule {
+  id        String       @id @default(cuid())
+  companyId String
+  company   Company      @relation(fields: [companyId], references: [id])
+  name      String
+  frequency PayFrequency
+  anchorPayday DateTime
+  employees Employee[]
+  payRuns   PayRun[]
+}
+
+model Employee {
+  id                 String       @id @default(cuid())
+  companyId          String
+  company            Company      @relation(fields: [companyId], references: [id])
+  payScheduleId      String
+  paySchedule        PaySchedule  @relation(fields: [payScheduleId], references: [id])
+  providerEmployeeId String?      @unique
+  firstName          String
+  lastName           String
+  birthDate          DateTime
+  hireDate           DateTime
+  terminationDate    DateTime?
+  terminationReason  String?
+  status             WorkerStatus @default(ONBOARDING)
+  workState          String
+  payBasis           PayBasis
+  payRateCents       Int // hourly rate or annual salary
+  nyManualWorker     Boolean      @default(false)
+  electronicW2Consent Boolean     @default(false)
+  payRunLines        PayRunLine[]
+  advances           Advance[]
+  retirementElections RetirementElection[]
+  sickLeaveLedger    SickLeaveEntry[]
+}
+
+model Contractor {
+  id                   String       @id @default(cuid())
+  companyId            String
+  company              Company      @relation(fields: [companyId], references: [id])
+  providerContractorId String?      @unique
+  legalName            String
+  tinType              String // ssn | ein
+  tinVerified          Boolean      @default(false)
+  w9ReceivedAt         DateTime?
+  electronic1099Consent Boolean     @default(false)
+  status               WorkerStatus @default(ONBOARDING)
+  payments             ContractorPayment[]
+}
+
+model ContractorPayment {
+  id                  String     @id @default(cuid())
+  contractorId        String
+  contractor          Contractor @relation(fields: [contractorId], references: [id])
+  amountCents         Int
+  backupWithholdingCents Int     @default(0)
+  paidOn              DateTime
+}
+
+model PayRun {
+  id               String       @id @default(cuid())
+  companyId        String
+  company          Company      @relation(fields: [companyId], references: [id])
+  payScheduleId    String
+  paySchedule      PaySchedule  @relation(fields: [payScheduleId], references: [id])
+  periodStart      DateTime
+  periodEnd        DateTime
+  payday           DateTime
+  offCycle         Boolean      @default(false)
+  status           PayRunStatus @default(DRAFT)
+  providerPayrollId String?     @unique
+  approvedById     String?
+  approvedAt       DateTime?
+  lines            PayRunLine[]
+}
+
+model PayRunLine {
+  id                   String   @id @default(cuid())
+  payRunId             String
+  payRun               PayRun   @relation(fields: [payRunId], references: [id])
+  employeeId           String
+  employee             Employee @relation(fields: [employeeId], references: [id])
+  hours                Float?
+  grossCents           Int
+  employeeTaxesCents   Int
+  employerTaxesCents   Int
+  /** Per-tax employer breakdown shown in the cost preview: { social_security, medicare, futa, suta, ... } */
+  employerTaxDetail    Json
+  deductionsCents      Int
+  netCents             Int
+}
+
+model Advance {
+  id                 String   @id @default(cuid())
+  employeeId         String
+  employee           Employee @relation(fields: [employeeId], references: [id])
+  principalCents     Int
+  installmentCents   Int
+  repaidCents        Int      @default(0)
+  /** Signed authorization stored with the record; required before any deduction. */
+  authorizationDocId String?
+  issuedAt           DateTime @default(now())
+  closedAt           DateTime?
+}
+
+model RetirementSetting {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+  /** MYCTSAVINGS | OREGONSAVES | EMPLOYER_401K | EMPLOYER_403B */
+  program   String
+  /** Employer certified it offers a qualified plan (exempts it from the state program). */
+  exemptByQualifiedPlan Boolean @default(false)
+  defaultRate Float
+}
+
+model RetirementElection {
+  id         String   @id @default(cuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  program    String
+  rate       Float // 0 = opted out
+  rothOrPreTax String // ROTH | PRETAX
+  effective  DateTime
+}
+
+model SickLeaveEntry {
+  id         String   @id @default(cuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  /** Positive = accrued, negative = used. */
+  hours      Float
+  reason     String // ACCRUAL | USE | CARRYOVER | ADJUSTMENT
+  payRunId   String?
+  createdAt  DateTime @default(now())
+}
+
+model Filing {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+  form      String // 941, 940, W-2, W-3, 1099-NEC, CT-941, M-941, OQ, NYS-45, MTA-305
+  period    String // e.g. 2026-Q1 or 2026
+  status    String   @default("pending")
+  filedAt   DateTime?
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String
+  companyId String?
+  action    String
+  detail    Json
+  createdAt DateTime @default(now())
+}
