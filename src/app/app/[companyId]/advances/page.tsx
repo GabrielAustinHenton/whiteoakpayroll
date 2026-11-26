@@ -1,13 +1,14 @@
 import { db } from "@/lib/db";
 import { requireArea } from "@/lib/auth/session";
 import { Notice, messages, prettyDate, usd } from "@/components/ui";
-import { decideAdvance, inviteEmployee } from "../actions";
+import { decideAdvance } from "../actions";
+import { loginStatus } from "@/lib/app/invites";
 
 export default async function Advances({ params, searchParams }: { params: Promise<{ companyId: string }>; searchParams: Promise<Record<string, string>> }) {
   const { companyId } = await params;
   await requireArea(companyId, "advances");
   const { error, ok } = await messages(searchParams);
-  const employees = await db.employee.findMany({ where: { companyId, status: { not: "TERMINATED" } }, orderBy: { lastName: "asc" } });
+  const employees = await db.employee.findMany({ where: { companyId, status: { not: "TERMINATED" } }, include: { user: true }, orderBy: { lastName: "asc" } });
   const advances = await db.advance.findMany({ where: { employee: { companyId } }, include: { employee: true }, orderBy: { requestedAt: "desc" } });
   return (
     <>
@@ -17,8 +18,8 @@ export default async function Advances({ params, searchParams }: { params: Promi
       <div className="card">
         <p><b>How an employee requests an advance</b></p>
         <ol className="small">
-          <li>Invite them to the employee portal (button below, or on People). You get a temporary password to give them.</li>
-          <li>They sign in at whiteoakpayroll.com/login and open <b>My pay</b>.</li>
+          <li>When you add an employee, they get an email inviting them to the employee portal. They click the link and choose a password.</li>
+          <li>After that they sign in at whiteoakpayroll.com/login and land on <b>My pay</b>.</li>
           <li>Under <b>Payday advance</b> they enter the amount, how much to repay each pay run, and type their name to sign the repayment authorization.</li>
           <li>The request shows up here for you to approve or decline. Approved advances are repaid automatically on each pay run.</li>
         </ol>
@@ -29,16 +30,7 @@ export default async function Advances({ params, searchParams }: { params: Promi
               <tr key={e.id}>
                 <td>{e.firstName} {e.lastName}</td>
                 <td className="small">{e.workState}{e.workState === "CT" ? "" : " (advances not available)"}{e.status !== "ACTIVE" ? " · onboarding" : ""}</td>
-                <td>
-                  {e.userId ? <span className="small muted">Has portal login</span> : (
-                    <form action={inviteEmployee} className="inline">
-                      <input type="hidden" name="companyId" value={companyId} />
-                      <input type="hidden" name="employeeId" value={e.id} />
-                      <input type="hidden" name="back" value={`/app/${companyId}/advances`} />
-                      <button type="submit" className="link small">Invite to portal</button>
-                    </form>
-                  )}
-                </td>
+                <td className="small muted">{loginStatus(e.user).label}</td>
               </tr>
             ))}
           </tbody>

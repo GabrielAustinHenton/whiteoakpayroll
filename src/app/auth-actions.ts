@@ -6,6 +6,7 @@ import { hashPassword, passwordProblem, verifyPassword } from "@/lib/auth/passwo
 import { endSession, startSession, requireUser } from "@/lib/auth/session";
 import { normalizeEin } from "@/lib/app/ids";
 import { audit } from "@/lib/app/payroll-service";
+import { invitePending, userForInvite } from "@/lib/app/invites";
 import { str } from "@/components/ui";
 
 const back = (path: string, error: string) => redirect(`${path}?error=${encodeURIComponent(error)}`);
@@ -22,7 +23,8 @@ export async function signup(form: FormData) {
   const pw = passwordProblem(password);
   if (pw) back("/signup", pw);
   if (ein.error) back("/signup", ein.error);
-  if (await db.user.findUnique({ where: { email } })) back("/signup", "That email already has an account. Sign in instead.");
+  const taken = await db.user.findUnique({ where: { email } });
+  if (taken) back("/signup", invitePending(taken) ? "You've already been invited with that email. Use the link in your invite email to set your password." : "That email already has an account. Sign in instead.");
 
   const user = await db.user.create({ data: { email, name, passwordHash: hashPassword(password) } });
   const company = await db.company.create({
@@ -46,11 +48,29 @@ export async function login(form: FormData) {
   const email = str(form.get("email")).toLowerCase();
   const password = String(form.get("password") ?? "");
   const user = await db.user.findUnique({ where: { email }, include: { memberships: true, employee: true } });
+  if (user && invitePending(user)) back("/login", "Finish setting up your login with the link in your invite email first.");
   if (!user || !verifyPassword(password, user.passwordHash)) back("/login", "Email or password is wrong.");
   await startSession(user!.id);
   if (user!.isPlatformAdmin) redirect("/admin");
   if (user!.memberships.length === 0 && user!.employee) redirect("/me");
   redirect("/app");
+}
+
+/** Accept an emailed invite: choose a password, then go straight in. */
+export async function acceptInvite(form: FormData) {
+  const token = str(form.get("token"));
+  const here = `/invite/${encodeURIComponent(token)}`;
+  const password = String(form.get("password") ?? "");
+  const user = await userForInvite(token);
+  if (!user) back(here, "This invite link has expired or was already used. Ask your employer to resend it.");
+  const pw = passwordProblem(password);
+  if (pw) back(here, pw);
+  if (password !== String(form.get("confirm") ?? "")) back(here, "The two passwords don't match.");
+  await db.user.update({ where: { id: user!.id }, data: { passwordHash: hashPassword(password), inviteTokenHash: null, inviteExpiresAt: null } });
+  await audit(user!.id, user!.memberships[0]?.companyId ?? null, "invite.accepted");
+  await startSession(user!.id);
+  if (user!.memberships.some((m) => m.role !== "EMPLOYEE")) redirect("/app");
+  redirect(user!.employee ? "/me" : "/app");
 }
 
 export async function logout() {

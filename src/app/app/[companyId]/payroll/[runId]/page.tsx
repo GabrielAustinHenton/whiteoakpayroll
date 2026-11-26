@@ -184,11 +184,11 @@ export default async function PayRunPage({ params, searchParams }: { params: Pro
       <div className="card">
         <p className="big">{usd(fee.bill.total)}</p>
         <p>
-          <b>White Oak Payroll fee for {monthName}</b>: {fee.bill.tierRange ? `${fee.people} ${fee.people === 1 ? "person" : "people"} paid this month, tier ${fee.bill.tier} (${fee.bill.tierRange.from} to ${fee.bill.tierRange.to} people) at ${usd(PRICING.pricePerTier)}` : "nobody paid yet this month"}
+          <b>White Oak Payroll fee for {monthName}</b>: {fee.bill.tierRange ? `${fee.people} ${fee.people === 1 ? "person" : "people"} on payroll this month, tier ${fee.bill.tier} (${fee.bill.tierRange.from} to ${fee.bill.tierRange.to} people) at ${usd(PRICING.pricePerTier)}` : "nobody on payroll yet this month"}
           {fee.bill.addOns.length > 0 && ` plus ${fee.bill.addOns.map((a) => `${a.name} ${usd(a.price)}`).join(", ")}`}.
         </p>
         <p className="small muted">
-          One flat monthly fee, billed separately on {prettyDate(fee.billedOn)}. It is not part of this pay run&apos;s cash, and running payroll again this month for the same people does not raise it. No per-employee or per-run fees. <a href={`/app/${companyId}/billing`}>Plan and billing</a>
+          One flat monthly fee, billed separately on {prettyDate(fee.billedOn)}. It is not part of this pay run&apos;s cash, and running payroll again this month does not raise it; adding people does. No per-employee or per-run fees. <a href={`/app/${companyId}/billing`}>Plan and billing</a>
         </p>
       </div>
 

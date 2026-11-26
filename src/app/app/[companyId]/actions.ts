@@ -4,14 +4,15 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireArea } from "@/lib/auth/session";
-import { hashPassword, temporaryPassword } from "@/lib/auth/password";
+import { canUse, requireArea } from "@/lib/auth/session";
+import type { Role } from "@prisma/client";
+import { ensurePortalInvite, inviteTeammateLogin, resendInvite } from "@/lib/app/invites";
 import { normalizeEin, normalizeSsn } from "@/lib/app/ids";
 import { checkPayFrequency, type LaunchState } from "@/lib/payroll/schedules";
 import { canOfferAdvance } from "@/lib/payroll/advances";
 import { approveAndPay, audit, voidCheck, createPayRun, generateFilings, recalculate, refreshInvoice } from "@/lib/app/payroll-service";
 import { DEFAULT_HOURS, type Frequency } from "@/lib/app/periods";
-import { cents, str } from "@/components/ui";
+import { cents, str, usd } from "@/components/ui";
 
 const go = (path: string, msg: { error?: string; ok?: string } = {}): never => {
   const q = msg.error ? `?error=${encodeURIComponent(msg.error)}` : msg.ok ? `?ok=${encodeURIComponent(msg.ok)}` : "";
@@ -20,6 +21,26 @@ const go = (path: string, msg: { error?: string; ok?: string } = {}): never => {
 const day = (s: string) => new Date(`${s}T00:00:00Z`);
 const id = (form: FormData) => str(form.get("companyId"));
 const LAUNCH = ["CT", "MA", "OR", "NY"];
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const thisMonth = () => new Date().toISOString().slice(0, 7);
+const companyName = async (companyId: string) => {
+  const c = await db.company.findUniqueOrThrow({ where: { id: companyId } });
+  return c.tradeName || c.legalName;
+};
+
+/** Headcount changed: update this month's bill and, for people who can see billing, say what it is now. */
+async function feeNote(companyId: string, role: Role) {
+  const bill = await refreshInvoice(companyId, thisMonth());
+  if (!canUse(role, "billing")) return "";
+  return ` White Oak fee this month: ${usd(bill.total)} (${bill.peopleCount} ${bill.peopleCount === 1 ? "person" : "people"}).`;
+}
+
+/** Portal invite result, worded for the notice after saving an employee. */
+async function portalNote(e: Parameters<typeof ensurePortalInvite>[0]) {
+  const r = await ensurePortalInvite(e, await companyName(e.companyId));
+  if (!r) return "";
+  return " " + ("error" in r ? r.error : r.message);
+}
 
 /* ---------- Company settings ---------- */
 
@@ -142,6 +163,7 @@ function employeeFields(form: FormData) {
 
 async function validateEmployee(companyId: string, f: ReturnType<typeof employeeFields>, scheduleId: string, back: string) {
   if (!f.firstName || !f.lastName) go(back, { error: "First and last name are required." });
+  if (!EMAIL.test(f.email)) go(back, { error: "Enter the employee's email. Their portal invite goes there." });
   if (!LAUNCH.includes(f.workState)) go(back, { error: "Work state must be CT, MA, OR or NY." });
   if (Number.isNaN(f.birthDate.getTime()) || Number.isNaN(f.hireDate.getTime())) go(back, { error: "Enter the birth date and hire date." });
   if (f.payRateCents <= 0) go(back, { error: "Enter the pay rate." });
@@ -164,7 +186,7 @@ const statusFor = (f: { i9CompletedAt: Date | null }) => (f.i9CompletedAt ? "ACT
 
 export async function createEmployee(form: FormData) {
   const companyId = id(form);
-  const { user } = await requireArea(companyId, "people");
+  const { user, role } = await requireArea(companyId, "people");
   const back = `/app/${companyId}/people/new`;
   const ssn = normalizeSsn(str(form.get("ssn")));
   if (ssn.error) go(back, { error: ssn.error });
@@ -175,7 +197,8 @@ export async function createEmployee(form: FormData) {
     data: { ...f, companyId, payScheduleId: scheduleId, ssn: ssn.value!, status: statusFor(f), defaultHours: Number(str(form.get("defaultHours"))) || DEFAULT_HOURS[schedule.frequency as Frequency] },
   });
   await audit(user.id, companyId, "employee.created", { employeeId: e.id });
-  go(`/app/${companyId}/people/${e.id}`, { ok: `${f.firstName} added.` });
+  const invite = await portalNote(e);
+  go(`/app/${companyId}/people/${e.id}`, { ok: `${f.firstName} added.${invite}${await feeNote(companyId, role)}` });
 }
 
 export async function updateEmployee(form: FormData) {
@@ -190,7 +213,7 @@ export async function updateEmployee(form: FormData) {
   const ssnRaw = str(form.get("ssn"));
   const ssn = ssnRaw ? normalizeSsn(ssnRaw) : { value: existing.ssn };
   if ("error" in ssn && ssn.error) go(back, { error: ssn.error });
-  await db.employee.update({
+  const saved = await db.employee.update({
     where: { id: employeeId },
     data: {
       ...f,
@@ -202,12 +225,12 @@ export async function updateEmployee(form: FormData) {
     },
   });
   await audit(user.id, companyId, "employee.updated", { employeeId });
-  go(back, { ok: "Saved." });
+  go(back, { ok: `Saved.${saved.status === "TERMINATED" ? "" : await portalNote(saved)}` });
 }
 
 export async function terminateEmployee(form: FormData) {
   const companyId = id(form);
-  const { user } = await requireArea(companyId, "people");
+  const { user, role } = await requireArea(companyId, "people");
   const employeeId = str(form.get("employeeId"));
   const date = str(form.get("terminationDate"));
   await db.employee.update({
@@ -215,41 +238,36 @@ export async function terminateEmployee(form: FormData) {
     data: { status: "TERMINATED", terminationDate: day(date), terminationReason: str(form.get("reason")) || null },
   });
   await audit(user.id, companyId, "employee.terminated", { employeeId, date });
+  const fee = await feeNote(companyId, role);
   go(`/app/${companyId}/people/${employeeId}`, {
-    ok: "Offboarded. Run their final pay on or before the state deadline (MA: same day if fired; CT: next business day if fired; OR: end of next business day; NY: next regular payday).",
+    ok: `Offboarded. Run their final pay on or before the state deadline (MA: same day if fired; CT: next business day if fired; OR: end of next business day; NY: next regular payday). They still count toward this month's fee and drop off next month.${fee}`,
   });
 }
 
 export async function rehireEmployee(form: FormData) {
   const companyId = id(form);
-  await requireArea(companyId, "people");
+  const { role } = await requireArea(companyId, "people");
   const employeeId = str(form.get("employeeId"));
   await db.employee.update({ where: { id: employeeId, companyId }, data: { status: "ONBOARDING", terminationDate: null, terminationReason: null, i9CompletedAt: null } });
-  go(`/app/${companyId}/people/${employeeId}`, { ok: "Rehired. Complete a new I-9 if they left more than 3 years ago." });
+  go(`/app/${companyId}/people/${employeeId}`, { ok: `Rehired. Complete a new I-9 if they left more than 3 years ago.${await feeNote(companyId, role)}` });
 }
 
-/** Give an employee a portal login. The temporary password is shown once to the person inviting. */
-export async function inviteEmployee(form: FormData) {
+/** Send a pending portal invite again with a fresh link (for a lost or expired email). */
+export async function resendPortalInvite(form: FormData) {
   const companyId = id(form);
   const { user } = await requireArea(companyId, "people");
   const employeeId = str(form.get("employeeId"));
   const e = await db.employee.findFirstOrThrow({ where: { id: employeeId, companyId } });
-  const requested = str(form.get("back"));
-  const back = requested.startsWith(`/app/${companyId}/`) ? requested : `/app/${companyId}/people/${employeeId}`;
-  if (e.userId) go(back, { error: "They already have a login." });
-  if (!e.email) go(back, { error: "Add their email first." });
-  const pw = temporaryPassword();
-  let u = await db.user.findUnique({ where: { email: e.email } });
-  if (u) go(back, { error: "That email already has a White Oak login; use a different email for the employee portal." });
-  u = await db.user.create({ data: { email: e.email, name: `${e.firstName} ${e.lastName}`, passwordHash: hashPassword(pw), memberships: { create: { companyId, role: "EMPLOYEE" } } } });
-  await db.employee.update({ where: { id: employeeId }, data: { userId: u.id } });
-  await audit(user.id, companyId, "employee.invited", { employeeId });
-  go(back, { ok: `Portal login created for ${e.firstName}: they sign in at whiteoakpayroll.com/login with ${e.email} and temporary password ${pw} (shown once; they can change it under Account).` });
+  const back = `/app/${companyId}/people/${employeeId}`;
+  if (!e.userId) go(back, { error: "Save the employee with an email first." });
+  const r = await resendInvite(e.userId!, await companyName(companyId), "portal");
+  await audit(user.id, companyId, "employee.invite_resent", { employeeId });
+  go(back, { ok: r.message });
 }
 
 export async function createContractor(form: FormData) {
   const companyId = id(form);
-  const { user } = await requireArea(companyId, "people");
+  const { user, role } = await requireArea(companyId, "people");
   const back = `/app/${companyId}/people/contractors/new`;
   const tinType = str(form.get("tinType")) === "ein" ? "ein" : "ssn";
   const tin = tinType === "ein" ? normalizeEin(str(form.get("tin"))) : normalizeSsn(str(form.get("tin")));
@@ -274,15 +292,16 @@ export async function createContractor(form: FormData) {
     },
   });
   await audit(user.id, companyId, "contractor.created", { contractorId: k.id });
-  go(`/app/${companyId}/people`, { ok: `${legalName} added as a contractor.` });
+  go(`/app/${companyId}/people`, { ok: `${legalName} added as a contractor.${await feeNote(companyId, role)}` });
 }
 
 export async function setContractorStatus(form: FormData) {
   const companyId = id(form);
-  await requireArea(companyId, "people");
+  const { role } = await requireArea(companyId, "people");
   const status = str(form.get("status")) === "TERMINATED" ? "TERMINATED" : "ACTIVE";
   await db.contractor.update({ where: { id: str(form.get("contractorId")), companyId }, data: { status } });
-  go(`/app/${companyId}/people`, { ok: status === "TERMINATED" ? "Contractor ended." : "Contractor reactivated." });
+  const fee = await feeNote(companyId, role);
+  go(`/app/${companyId}/people`, { ok: (status === "TERMINATED" ? "Contractor ended. They still count toward this month's fee and drop off next month." : "Contractor reactivated.") + fee });
 }
 
 /* ---------- Pay runs ---------- */
@@ -429,7 +448,7 @@ export async function toggleAddOn(form: FormData) {
   if (existing) await db.companyModule.delete({ where: { id: existing.id } });
   else await db.companyModule.create({ data: { companyId, addOn } });
   await audit(user.id, companyId, existing ? "addon.disabled" : "addon.enabled", { addOn });
-  await refreshInvoice(companyId, new Date().toISOString().slice(0, 7));
+  await refreshInvoice(companyId, thisMonth());
   go(`/app/${companyId}/billing`, { ok: existing ? "Add-on turned off." : "Add-on turned on." });
 }
 
@@ -441,16 +460,10 @@ export async function inviteTeammate(form: FormData) {
   const back = `/app/${companyId}/team`;
   const email = str(form.get("email")).toLowerCase();
   const role = str(form.get("role")) === "CLIENT_OWNER" ? "CLIENT_OWNER" : "CLIENT_HR";
-  if (!email) go(back, { error: "Enter an email." });
-  let u = await db.user.findUnique({ where: { email } });
-  let pw: string | null = null;
-  if (!u) {
-    pw = temporaryPassword();
-    u = await db.user.create({ data: { email, name: str(form.get("name")) || email, passwordHash: hashPassword(pw) } });
-  }
-  await db.membership.upsert({ where: { userId_companyId: { userId: u.id, companyId } }, create: { userId: u.id, companyId, role }, update: { role } });
+  if (!EMAIL.test(email)) go(back, { error: "Enter an email." });
+  const r = await inviteTeammateLogin(email, str(form.get("name")), companyId, role, await companyName(companyId));
   await audit(user.id, companyId, "team.invited", { email, role });
-  go(back, { ok: pw ? `Added ${email}. Temporary password: ${pw} (shown once).` : `Added ${email}; they sign in with their existing password.` });
+  go(back, { ok: `Added ${email}. ${r.message}` });
 }
 
 export async function removeTeammate(form: FormData) {

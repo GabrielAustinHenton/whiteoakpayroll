@@ -188,23 +188,39 @@ export async function generateFilings(companyId: string, period: string, actorId
   return forms.length;
 }
 
-/** People paid in a month (employees + contractors) set the tier; add-ons come from the company's modules. */
-async function monthBill(companyId: string, month: string, includeDraftRunId?: string) {
+/**
+ * People on the bill for a month: every employee on payroll at any point in the month (added to
+ * White Oak by month end and not let go before it began) plus every active contractor, and anyone
+ * paid that month. The count never drops within a month: adding a 6th person moves the month to the
+ * next tier, and offboarding them that month does not move it back.
+ */
+async function monthBill(companyId: string, month: string) {
   const [y, mo] = month.split("-").map(Number);
   const from = new Date(Date.UTC(y, mo - 1, 1));
   const to = new Date(Date.UTC(y, mo, 1));
-  const runFilter = includeDraftRunId ? { OR: [{ status: "PAID" as const }, { id: includeDraftRunId }] } : { status: "PAID" as const };
-  const lines = await db.payRunLine.findMany({ where: { payRun: { companyId, payday: { gte: from, lt: to }, ...runFilter }, grossCents: { gt: 0 } }, select: { employeeId: true } });
-  const pays = await db.contractorPayment.findMany({
-    where: { contractor: { companyId }, paidOn: { gte: from, lt: to }, OR: [{ payRunId: null }, { payRun: runFilter }] },
-    select: { contractorId: true },
-  });
-  const people = new Set([...lines.map((l) => `e:${l.employeeId}`), ...pays.map((p) => `c:${p.contractorId}`)]).size;
-  const modules = await db.companyModule.findMany({ where: { companyId } });
+  const [employees, contractors, lines, pays, stored, modules] = await Promise.all([
+    db.employee.findMany({ where: { companyId, createdAt: { lt: to }, OR: [{ terminationDate: null }, { terminationDate: { gte: from } }] }, select: { id: true } }),
+    db.contractor.findMany({ where: { companyId, createdAt: { lt: to }, status: { not: "TERMINATED" } }, select: { id: true } }),
+    db.payRunLine.findMany({ where: { payRun: { companyId, payday: { gte: from, lt: to }, status: "PAID" }, grossCents: { gt: 0 } }, select: { employeeId: true } }),
+    db.contractorPayment.findMany({
+      where: { contractor: { companyId }, paidOn: { gte: from, lt: to }, OR: [{ payRunId: null }, { payRun: { status: "PAID" } }] },
+      select: { contractorId: true },
+    }),
+    db.invoice.findUnique({ where: { companyId_month: { companyId, month } } }),
+    db.companyModule.findMany({ where: { companyId } }),
+  ]);
+  const counted = new Set([
+    ...employees.map((e) => `e:${e.id}`),
+    ...lines.map((l) => `e:${l.employeeId}`),
+    ...contractors.map((k) => `c:${k.id}`),
+    ...pays.map((p) => `c:${p.contractorId}`),
+  ]).size;
+  const people = Math.max(counted, stored?.peoplePaid ?? 0);
   const addOns = modules.map((m) => (m.addOn === "PTO" ? "pto" : "time_tracking") as AddOnKey);
   return { people, bill: monthlyBill(people, addOns) };
 }
 
+/** Recompute and store a month's bill. Called whenever headcount, payments or add-ons change. */
 export async function refreshInvoice(companyId: string, month: string) {
   const { people, bill } = await monthBill(companyId, month);
   await db.invoice.upsert({
@@ -212,18 +228,18 @@ export async function refreshInvoice(companyId: string, month: string) {
     create: { companyId, month, peoplePaid: people, tier: bill.tier, totalCents: bill.total, lines: bill as unknown as Prisma.InputJsonValue },
     update: { peoplePaid: people, tier: bill.tier, totalCents: bill.total, lines: bill as unknown as Prisma.InputJsonValue },
   });
-  return bill;
+  return { ...bill, peopleCount: people };
 }
 
 /**
- * The White Oak fee for a pay run's month, counting this run's people (even while it is a draft).
- * The fee is one flat monthly charge billed on the 1st of the next month; it is never added to a
- * pay run's cash, and paying the same people again that month does not raise it.
+ * The White Oak fee for a pay run's month. The fee is one flat monthly charge for the people on
+ * payroll, billed on the 1st of the next month; it is never added to a pay run's cash, and
+ * running payroll again that month does not raise it.
  */
 export async function feeForRun(payRunId: string) {
   const run = await db.payRun.findUniqueOrThrow({ where: { id: payRunId } });
   const month = iso(run.payday).slice(0, 7);
-  const { people, bill } = await monthBill(run.companyId, month, run.status === "DRAFT" ? run.id : undefined);
+  const { people, bill } = await monthBill(run.companyId, month);
   const [y, mo] = month.split("-").map(Number);
   const billedOn = new Date(Date.UTC(y, mo, 1));
   return { month, people, bill, billedOn };

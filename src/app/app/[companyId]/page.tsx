@@ -41,7 +41,7 @@ export default async function Overview({ params }: { params: Promise<{ companyId
         <div className="stat"><b>{c._count.contractors}</b>contractors</div>
         {bill && (
           <a className="stat" href={`${base}/billing`} style={{ textDecoration: "none", color: "inherit" }}>
-            <b>{usd(bill.total)}</b>White Oak fee this month{bill.tierRange ? ` (${bill.tierRange.from} to ${bill.tierRange.to} people)` : " (nobody paid yet)"}
+            <b>{usd(bill.total)}</b>White Oak fee this month{bill.tierRange ? ` (${bill.peopleCount} ${bill.peopleCount === 1 ? "person" : "people"})` : " (nobody on payroll yet)"}
           </a>
         )}
       </div>

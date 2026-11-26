@@ -48,6 +48,31 @@ Use Neon through Vercel; it is standard Postgres, so it can move later.
 6. Go to https://whiteoakpayroll.com/signup and create the first company. To make that login a White Oak
    admin (sees every client), go to https://whiteoakpayroll.com/admin/claim and enter `ADMIN_SETUP_TOKEN`.
 
+## Turning on email (employee and teammate invites)
+
+Adding an employee emails them an invite to the employee portal; adding a teammate does the same.
+Email goes through [Resend](https://resend.com) (free for 3,000 emails a month). Until it is set up,
+the app shows the invite link on screen after you save, so you can send it yourself.
+
+1. Sign up at https://resend.com.
+2. Open **Domains → Add Domain**, enter `whiteoakpayroll.com`, and pick the US region.
+3. Resend lists a few DNS records (a TXT record for DKIM named like `resend._domainkey`, and an MX and a
+   TXT record on the `send` subdomain). In GoDaddy open **My Products → whiteoakpayroll.com → DNS**,
+   click **Add New Record** for each one, and copy the type, name and value exactly as Resend shows them.
+   Back in Resend click **Verify DNS Records**; it usually turns green within an hour.
+4. In Resend open **API Keys → Create API Key**, name it `vercel`, permission **Sending access**, and copy it.
+5. In Vercel open **Settings → Environment Variables** and add:
+
+   | Name | Value |
+   |------|-------|
+   | `RESEND_API_KEY` | the key from step 4 |
+   | `EMAIL_FROM` | `White Oak Payroll <hello@whiteoakpayroll.com>` |
+   | `APP_URL` | `https://whiteoakpayroll.com` |
+
+6. Redeploy (**Deployments → ⋯ → Redeploy**) so the new variables take effect.
+
+Invite links work once and expire after 14 days. A pending invite can be resent from the employee's page.
+
 ## Moving off Vercel later
 
 The app is kept portable so it can move hosts without code changes:

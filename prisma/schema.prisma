@@ -60,8 +60,12 @@ model User {
   id           String       @id @default(cuid())
   email        String       @unique
   name         String
-  /** scrypt hash: salt:hash, hex. */
+  /** scrypt hash: salt:hash, hex. Empty while an emailed invite is waiting to be accepted. */
   passwordHash String
+  /** SHA-256 of the emailed invite link's token; cleared once they set a password. */
+  inviteTokenHash String?   @unique
+  inviteExpiresAt DateTime?
+  invitedAt       DateTime?
   /** Only White Oak staff. Client roles live on Membership. */
   isPlatformAdmin Boolean   @default(false)
   createdAt    DateTime     @default(now())

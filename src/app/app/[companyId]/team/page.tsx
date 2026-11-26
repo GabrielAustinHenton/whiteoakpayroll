@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { requireArea } from "@/lib/auth/session";
 import { Field, Notice, messages } from "@/components/ui";
 import { inviteTeammate, removeTeammate } from "../actions";
+import { loginStatus } from "@/lib/app/invites";
 
 const LABEL = { CLIENT_OWNER: "Owner (full access)", CLIENT_HR: "HR (onboard and offboard only)", EMPLOYEE: "Employee portal", PLATFORM_ADMIN: "White Oak admin" } as const;
 
@@ -19,7 +20,7 @@ export default async function Team({ params, searchParams }: { params: Promise<{
         <tbody>
           {members.map((m) => (
             <tr key={m.id}>
-              <td>{m.user.name}</td><td>{m.user.email}</td><td>{LABEL[m.role]}</td>
+              <td>{m.user.name}</td><td>{m.user.email}</td><td>{LABEL[m.role]}</td><td className="small muted">{loginStatus(m.user).label}</td>
               <td>
                 <form action={removeTeammate} className="inline">
                   <input type="hidden" name="companyId" value={companyId} />
@@ -32,6 +33,7 @@ export default async function Team({ params, searchParams }: { params: Promise<{
         </tbody>
       </table>
       <h2>Add someone</h2>
+      <p className="small muted">They get an email with a link to choose their password. If they already have a White Oak login, they just get access.</p>
       <form action={inviteTeammate} className="form">
         <input type="hidden" name="companyId" value={companyId} />
         <div className="row">
