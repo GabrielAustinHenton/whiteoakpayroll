@@ -25,6 +25,17 @@ The site is a Next.js app and every page is static today, so it needs no databas
 Set both records to **DNS only** (grey cloud). Cloudflare's proxy is not needed for SSL and can break
 Vercel's certificate renewal.
 
+## Moving off Vercel later
+
+The app is kept portable so it can move hosts without code changes:
+
+- `next.config.ts` uses `output: "standalone"` and the `Dockerfile` builds a plain Node container
+  (`docker build -t whiteoak . && docker run -p 3000:3000 whiteoak`).
+- Run that image on AWS (App Runner or ECS Fargate), Fly.io, Render, or Railway.
+- Rules that keep this true: use standard Postgres through `DATABASE_URL` (e.g. Neon or AWS RDS), not
+  Vercel Postgres/KV/Blob/Edge Config; keep secrets in env vars; no Vercel-only APIs in app code.
+- To switch: deploy the container, set the same env vars, then point the DNS records at the new host.
+
 ## Before handling real payroll data
 
 This deploy is a public preview. Before any real employee data, see the go-live list in the project thread:
