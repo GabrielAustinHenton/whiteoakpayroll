@@ -15,6 +15,10 @@ Next.js (App Router, TypeScript), PostgreSQL with Prisma, Vitest. Tax calculatio
 | `src/lib/pricing.ts` | Tier pricing (placeholder $25 per 5 people) and add-on modules (Time Tracking, PTO) |
 | `src/lib/tax-engine/` | In-house tax engine: versioned tax tables with sources (`tables/<year>/`), federal withholding (Pub. 15-T), FICA, FUTA, deduction taxability, paycheck calculator |
 | `src/lib/taxes/` | Employer tax cost preview and state paid leave contributions |
+| `src/lib/filings/` | Forms 941, 940, W-2/W-3 and SSA EFW2 file, 1099-NEC and 1096, CT-941, CT-W3, M-941, Oregon OQ, NYS-45, and deposit due dates |
+| `src/lib/money-movement/` | Interface for TD Bank money movement, plus a NACHA file writer placeholder |
+| `docs/tax-engine.md` | How the engine works and what still needs verifying |
+| `docs/registrations.md` | IRS, SSA and state registrations needed before filing for clients |
 | `src/lib/payroll/schedules.ts` | Pay frequency rules for CT, MA, OR, NY |
 | `src/lib/payroll/advances.ts` | Zero-interest payday advances repaid by payroll deduction (CT only for now) |
 | `prisma/schema.prisma` | Data model: companies, roles, employees, contractors, pay runs, advances, retirement, sick leave, filings |

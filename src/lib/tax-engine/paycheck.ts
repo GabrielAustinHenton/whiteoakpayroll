@@ -3,6 +3,7 @@ import type { PayFrequency } from "./types";
 import { taxableWages, type Deduction, type TaxableWages } from "./deductions";
 import { federalIncomeTax, federalSupplementalTax, type FederalW4 } from "./federal/income-tax";
 import { fica, futa } from "./federal/fica-futa";
+import { stateLines as stateLinesFn, type EmployerStateSettings, type StateCertificate, type StateInput } from "./state";
 
 /** Year-to-date amounts for this employee at this employer, before the current paycheck. */
 export interface YearToDate {
@@ -54,8 +55,8 @@ export interface PaycheckResult {
 }
 
 /**
- * Federal part of a paycheck: income tax, FICA both sides, FUTA. State modules add their own
- * lines through `addLines` (see `state/` in the next change), so filings read one list of lines.
+ * Federal part of a paycheck: income tax, FICA both sides, FUTA. `calculatePaycheck` adds the
+ * state and local lines, so filings read one list of lines.
  */
 export function federalPaycheck(input: PaycheckInput): PaycheckResult {
   const supplemental = input.supplementalWages ?? 0;
@@ -100,4 +101,28 @@ export function finalize(employeeId: string, gross: Cents, wages: TaxableWages, 
     deductions: deductionTotal,
     net: gross - employeeTaxes - deductionTotal,
   };
+}
+
+export interface FullPaycheckInput extends PaycheckInput {
+  state: StateCertificate;
+  employerState: EmployerStateSettings;
+  stateYtd: StateInput["ytd"];
+}
+
+/** Federal, state and local taxes for one paycheck. */
+export function calculatePaycheck(input: FullPaycheckInput): PaycheckResult {
+  const fed = federalPaycheck(input);
+  const get = (id: string) => fed.lines.find((l) => l.id === id)?.amount ?? 0;
+  const lines = stateLinesFn({
+    certificate: input.state,
+    frequency: input.frequency,
+    gross: fed.gross,
+    stateIncomeWages: fed.wages.stateIncome,
+    suiWages: fed.wages.fica,
+    federalWithholding: get("federal_income"),
+    ficaWithheld: get("social_security") + get("medicare"),
+    employer: input.employerState,
+    ytd: input.stateYtd,
+  });
+  return finalize(input.employeeId, fed.gross, fed.wages, input.deductions, [...fed.lines, ...lines]);
 }
