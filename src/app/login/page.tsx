@@ -1,0 +1,20 @@
+import { login } from "../auth-actions";
+import { Field, Notice, messages } from "@/components/ui";
+
+export const metadata = { title: "Sign in · White Oak Payroll" };
+
+export default async function LoginPage({ searchParams }: { searchParams: Promise<Record<string, string>> }) {
+  const { error } = await messages(searchParams);
+  return (
+    <>
+      <h1>Sign in</h1>
+      <Notice error={error} />
+      <form action={login} className="form narrow">
+        <Field label="Email"><input name="email" type="email" required autoComplete="email" /></Field>
+        <Field label="Password"><input name="password" type="password" required autoComplete="current-password" /></Field>
+        <button type="submit">Sign in</button>
+        <p className="small muted">New company? <a href="/signup">Set up your company</a></p>
+      </form>
+    </>
+  );
+}

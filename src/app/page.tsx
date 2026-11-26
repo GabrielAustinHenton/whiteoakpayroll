@@ -11,7 +11,7 @@ export default function Home() {
         state unemployment.
       </p>
       <p>
-        <a href="/pricing">See your price</a> · <a href="/preview">See a sample pay run</a>
+        <a href="/signup">Set up your company</a> · <a href="/pricing">See your price</a> · <a href="/preview">See a sample pay run</a>
       </p>
     </>
   );
