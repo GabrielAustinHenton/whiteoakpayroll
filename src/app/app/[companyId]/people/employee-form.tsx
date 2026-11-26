@@ -88,7 +88,7 @@ export function EmployeeForm({ companyId, schedules, e, action, submit, companyS
           const b = (k: string) => mine && s[k] === true;
           const n = (k: string) => `s_${st.toLowerCase()}_${k}`;
           return (
-            <details key={st} open={mine || (!e && st === companyState)}>
+            <details key={st} data-state={st} open={mine || (!e && st === companyState)}>
               <summary>{{ CT: "Connecticut CT-W4", MA: "Massachusetts M-4", OR: "Oregon OR-W-4", NY: "New York IT-2104" }[st]}</summary>
               {st === "CT" && (
                 <div className="row">
@@ -167,6 +167,12 @@ export function EmployeeForm({ companyId, schedules, e, action, submit, companyS
         <p className="small muted">The employee becomes Active once the I-9 is complete.</p>
       </fieldset>
       <button type="submit">{submit}</button>
+      {/* Open the matching state certificate when the work state changes. */}
+      <script
+        dangerouslySetInnerHTML={{
+          __html: `document.currentScript.closest("form").querySelector("[name=workState]").addEventListener("change",function(ev){var f=ev.target.form;f.querySelectorAll("details[data-state]").forEach(function(d){d.open=d.dataset.state===ev.target.value;});});`,
+        }}
+      />
     </form>
   );
 }
