@@ -202,7 +202,9 @@ describe("1099-NEC", () => {
     expect(forms.map((f) => f.contractor.id)).toEqual(["big"]);
     expect(forms[0].box7_stateIncome).toBe(dollars(2_500));
     const t = form1096(forms, 2026, { name: employer.name, ein: employer.ein }, false);
-    expect(t).toMatchObject({ box3_totalForms: 1, box5_totalAmountReported: dollars(2_500), notRequired: false });
+    expect(t).toMatchObject({ box3_totalForms: 1, box5_totalAmountReported: dollars(2_500), sentToIrs: true });
+    // Built for the records even when the 1099s are e-filed (CT auditors ask for it).
+    expect(form1096(forms, 2026, { name: employer.name, ein: employer.ein }, true)).toMatchObject({ box3_totalForms: 1, sentToIrs: false });
     expect(mustEfileInformationReturns(9)).toBe(false);
     expect(mustEfileInformationReturns(10)).toBe(true);
   });

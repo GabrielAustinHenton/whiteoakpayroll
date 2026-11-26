@@ -101,8 +101,9 @@ export function necCsv(forms: Form1099Nec[]): string {
 }
 
 /**
- * Form 1096, Annual Summary and Transmittal of U.S. Information Returns. Required only for paper
- * 1099s mailed to the IRS (one 1096 per form type); e-filed 1099s through IRIS need no 1096.
+ * Form 1096, Annual Summary and Transmittal of U.S. Information Returns. The IRS needs it only
+ * with paper 1099s (one 1096 per form type); e-filed 1099s through IRIS need no 1096. We always
+ * generate and archive one anyway, because Connecticut auditors ask employers for it.
  * Paper 1099-NEC with 1096 is due January 31 (February 1, 2027 for TY2026, since Jan 31 is a Sunday).
  * Filers of 10 or more information returns in total must e-file, so paper is only for very small clients.
  */
@@ -114,8 +115,8 @@ export interface Form1096 {
   box3_totalForms: number;
   box4_federalTaxWithheld: Cents;
   box5_totalAmountReported: Cents;
-  /** True when the forms are e-filed and the 1096 is not needed. */
-  notRequired: boolean;
+  /** True when mailed to the IRS with paper 1099s; false when the 1099s were e-filed and this copy is kept for the records (e.g. CT audits). */
+  sentToIrs: boolean;
 }
 
 export function form1096(forms: Form1099Nec[], year: number, filer: { name: string; ein: string }, eFiled: boolean): Form1096 {
@@ -127,7 +128,7 @@ export function form1096(forms: Form1099Nec[], year: number, filer: { name: stri
     box3_totalForms: forms.length,
     box4_federalTaxWithheld: forms.reduce((s, f) => s + f.box4_federalTaxWithheld, 0),
     box5_totalAmountReported: forms.reduce((s, f) => s + f.box1_nonemployeeComp, 0),
-    notRequired: eFiled,
+    sentToIrs: !eFiled,
   };
 }
 
