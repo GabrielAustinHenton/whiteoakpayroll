@@ -99,3 +99,39 @@ export function necCsv(forms: Form1099Nec[]): string {
   );
   return [head.join(","), ...rows].join("\n") + "\n";
 }
+
+/**
+ * Form 1096, Annual Summary and Transmittal of U.S. Information Returns. Required only for paper
+ * 1099s mailed to the IRS (one 1096 per form type); e-filed 1099s through IRIS need no 1096.
+ * Paper 1099-NEC with 1096 is due January 31 (February 1, 2027 for TY2026, since Jan 31 is a Sunday).
+ * Filers of 10 or more information returns in total must e-file, so paper is only for very small clients.
+ */
+export interface Form1096 {
+  year: number;
+  filerName: string;
+  filerTin: string;
+  formType: "1099-NEC";
+  box3_totalForms: number;
+  box4_federalTaxWithheld: Cents;
+  box5_totalAmountReported: Cents;
+  /** True when the forms are e-filed and the 1096 is not needed. */
+  notRequired: boolean;
+}
+
+export function form1096(forms: Form1099Nec[], year: number, filer: { name: string; ein: string }, eFiled: boolean): Form1096 {
+  return {
+    year,
+    filerName: filer.name,
+    filerTin: filer.ein,
+    formType: "1099-NEC",
+    box3_totalForms: forms.length,
+    box4_federalTaxWithheld: forms.reduce((s, f) => s + f.box4_federalTaxWithheld, 0),
+    box5_totalAmountReported: forms.reduce((s, f) => s + f.box1_nonemployeeComp, 0),
+    notRequired: eFiled,
+  };
+}
+
+/** IRS e-file mandate: 10 or more information returns of all types in a calendar year (T.D. 9972). */
+export function mustEfileInformationReturns(totalInformationReturns: number): boolean {
+  return totalInformationReturns >= 10;
+}

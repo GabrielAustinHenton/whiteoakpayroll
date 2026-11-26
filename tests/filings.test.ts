@@ -8,6 +8,9 @@ import {
   build1099Necs,
   check941,
   ct941,
+  ctW3,
+  form1096,
+  mustEfileInformationReturns,
   ctDepositDue,
   federal941DepositDue,
   form940,
@@ -136,6 +139,20 @@ describe("W-2, W-3 and EFW2", () => {
   });
 });
 
+describe("CT-W3", () => {
+  it("reconciles CT W-2 withholding with what was paid for the year", () => {
+    const w2s = buildW2s(records, 2026, employer);
+    const total = sumLines(records, "ct_income");
+    const f = ctW3(w2s, [], 2026, total - dollars(10));
+    expect(f.w2Count).toBe(2);
+    expect(f.line2_ctTaxWithheldW2).toBe(total);
+    expect(f.line6_balanceDue).toBe(dollars(10));
+    // The four CT-941s add up to the CT-W3 total.
+    const quarters = ([1, 2, 3, 4] as const).map((q) => ct941(records, 2026, q, 0).line3_ctTaxWithheld);
+    expect(quarters.reduce((a, b) => a + b, 0)).toBe(f.line4_totalCtTaxWithheld);
+  });
+});
+
 describe("state quarterly returns", () => {
   it("CT-941 matches CT withholding", () => {
     const f = ct941(records, 2026, 1, 0);
@@ -184,6 +201,10 @@ describe("1099-NEC", () => {
     );
     expect(forms.map((f) => f.contractor.id)).toEqual(["big"]);
     expect(forms[0].box7_stateIncome).toBe(dollars(2_500));
+    const t = form1096(forms, 2026, { name: employer.name, ein: employer.ein }, false);
+    expect(t).toMatchObject({ box3_totalForms: 1, box5_totalAmountReported: dollars(2_500), notRequired: false });
+    expect(mustEfileInformationReturns(9)).toBe(false);
+    expect(mustEfileInformationReturns(10)).toBe(true);
   });
 });
 
