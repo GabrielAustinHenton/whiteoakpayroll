@@ -18,7 +18,7 @@ export function EmployeeForm({ companyId, schedules, e, action, submit, companyS
         <div className="row">
           <Field label="First name"><input name="firstName" defaultValue={e?.firstName} required /></Field>
           <Field label="Last name"><input name="lastName" defaultValue={e?.lastName} required /></Field>
-          <Field label="Email" hint="For the employee portal"><input name="email" type="email" defaultValue={e?.email} required /></Field>
+          <Field label="Email" hint="Optional"><input name="email" type="email" defaultValue={e?.email} /></Field>
         </div>
         <div className="row">
           <Field label={e ? "SSN (leave blank to keep)" : "SSN"} hint={e ? `On file ending ${e.ssn.slice(-4)}` : "Test SSNs only: 000-xx-xxxx"}>

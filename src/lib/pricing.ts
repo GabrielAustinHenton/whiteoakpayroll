@@ -1,7 +1,8 @@
 import { dollars, type Cents } from "./money";
 
 /**
- * White Oak pricing: one flat monthly price that steps up for every 5 employees paid.
+ * White Oak pricing: one flat monthly price that steps up for every 5 people on payroll that month
+ * (employees and active contractors).
  * No base fee, no per-employee fee. Add-on modules are flat monthly prices on the same bill.
  *
  * PLACEHOLDERS: tier and add-on prices are not final (see the product spec's open questions).
@@ -17,7 +18,7 @@ export const PRICING = {
 
 export type AddOnKey = keyof typeof PRICING.addOns;
 
-/** Tier number for a month, from the highest number of people paid that month. 0 people = tier 0. */
+/** Tier number for a month, from the number of people on payroll that month. 0 people = tier 0. */
 export function tierFor(peoplePaid: number): number {
   if (!Number.isInteger(peoplePaid) || peoplePaid < 0) throw new Error("peoplePaid must be a non-negative integer");
   return Math.ceil(peoplePaid / PRICING.employeesPerTier);

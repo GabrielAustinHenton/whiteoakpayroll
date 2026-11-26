@@ -1,7 +1,7 @@
 import { db } from "../db";
 import type { CurrentUser } from "../auth/session";
 import { canUse, roleIn } from "../auth/session";
-import type { LineDetail } from "./engine";
+import { overtimeWages, type LineDetail } from "./engine";
 import { DEDUCTION_LABELS } from "../pay-run/review";
 import { usd, type FormDoc } from "../pdf/form-pdf";
 
@@ -11,7 +11,7 @@ export async function loadPaystub(lineId: string, user: CurrentUser) {
   if (!line || line.payRun.status !== "PAID") return null;
   const role = roleIn(user, line.payRun.companyId);
   const own = line.employee.userId === user.id;
-  if (!own && !canUse(role, "payroll")) return null;
+  if (!own && !canUse(role, "reports")) return null;
 
   const year = line.payRun.payday.getUTCFullYear();
   const ytdLines = await db.payRunLine.findMany({
@@ -35,7 +35,12 @@ export async function loadPaystub(lineId: string, user: CurrentUser) {
     employee: e,
     paidBy: check ? `Paper check ${check.number}` : `Direct deposit${line.employee.bankLast4 ? ` to account ending ${line.employee.bankLast4}` : ""}`,
     earnings: [
-      { label: e.payBasis === "HOURLY" ? `Regular (${line.hours ?? 0} h x ${usd(e.payRateCents)})` : "Salary", current: line.regularCents },
+      ...(e.payBasis === "HOURLY" && line.overtimeHours > 0
+        ? [
+            { label: `Regular (${line.hours ?? 0} h x ${usd(e.payRateCents)})`, current: line.regularCents - overtimeWages(e, line.overtimeHours) },
+            { label: `Overtime (${line.overtimeHours} h x ${usd(Math.round(e.payRateCents * 1.5))})`, current: overtimeWages(e, line.overtimeHours) },
+          ]
+        : [{ label: e.payBasis === "HOURLY" ? `Regular (${line.hours ?? 0} h x ${usd(e.payRateCents)})` : "Salary", current: line.regularCents }]),
       ...(line.bonusCents ? [{ label: "Bonus", current: line.bonusCents }] : []),
     ],
     gross: { current: line.grossCents, ytd: sumYtd("grossCents") },

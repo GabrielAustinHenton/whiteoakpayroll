@@ -14,7 +14,7 @@ export function PricingCalculator() {
       <PeopleInput />
       <p className="big">{formatUSD(bill.total)} / month</p>
       <p className="muted">
-        {bill.tierRange ? `Tier ${bill.tier}: ${bill.tierRange.from} to ${bill.tierRange.to} people.` : "No one paid, no charge."}
+        {bill.tierRange ? `Tier ${bill.tier}: ${bill.tierRange.from} to ${bill.tierRange.to} people.` : "No one on payroll, no charge."}
       </p>
       <p>
         <a href="/preview">See a sample pay run for {people} {people === 1 ? "person" : "people"}</a>

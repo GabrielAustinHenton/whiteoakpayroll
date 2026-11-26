@@ -60,8 +60,12 @@ model User {
   id           String       @id @default(cuid())
   email        String       @unique
   name         String
-  /** scrypt hash: salt:hash, hex. */
+  /** scrypt hash: salt:hash, hex. Empty while an emailed invite is waiting to be accepted. */
   passwordHash String
+  /** SHA-256 of the emailed invite link's token; cleared once they set a password. */
+  inviteTokenHash String?   @unique
+  inviteExpiresAt DateTime?
+  invitedAt       DateTime?
   /** Only White Oak staff. Client roles live on Membership. */
   isPlatformAdmin Boolean   @default(false)
   createdAt    DateTime     @default(now())
@@ -288,6 +292,8 @@ model PayRunLine {
   employeeId   String
   employee     Employee @relation(fields: [employeeId], references: [id])
   hours        Float?
+  /** Overtime hours, paid at 1.5x the hourly rate (hourly employees). */
+  overtimeHours Float   @default(0)
   regularCents Int
   bonusCents   Int      @default(0)
   grossCents   Int      @default(0)
