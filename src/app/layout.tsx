@@ -19,6 +19,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <nav>
             <a href="/pricing">Pricing</a>
             <a href="/preview">Pay run preview</a>
+            <a href="/review">Review pay run</a>
           </nav>
         </header>
         <main>{children}</main>
