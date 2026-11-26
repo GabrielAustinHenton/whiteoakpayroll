@@ -124,6 +124,12 @@ describe("New York (NYS-50-T-NYS Method II)", () => {
     const r = nycWithholding(dollars(1_010), "biweekly", { status: "single", allowances: 0, nycResident: true });
     expect(Math.abs(r - 2_445)).toBeLessThanOrEqual(5);
   });
+
+  it("NYC uses IT-2104 line 2 allowances when given", () => {
+    const one = nycWithholding(dollars(1_010), "biweekly", { status: "single", allowances: 0, nycAllowances: 1, nycResident: true });
+    const same = nycWithholding(dollars(1_010), "biweekly", { status: "single", allowances: 1, nycResident: true });
+    expect(one).toBe(same);
+  });
 });
 
 describe("full paycheck", () => {

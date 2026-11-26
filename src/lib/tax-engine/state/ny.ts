@@ -5,11 +5,15 @@ import { NYC_2026, NYS_2026, YONKERS_2026 } from "../tables/2026/ny";
 export interface NyIt2104 {
   /** Head of household withholds as single. */
   status: "single" | "married";
+  /** IT-2104 line 1: allowances for New York State and Yonkers. */
   allowances: number;
+  /** IT-2104 line 2: allowances for New York City. Defaults to line 1 when absent. */
+  nycAllowances?: number;
   /** Extra NYS / NYC / Yonkers per pay period (IT-2104 lines 3-5). */
   additionalState?: Cents;
   additionalNyc?: Cents;
   additionalYonkers?: Cents;
+  /** Exempt by Form IT-2104-E (IT-2104 itself cannot claim exemption). */
   exempt?: boolean;
   nycResident?: boolean;
   yonkersResident?: boolean;
@@ -48,7 +52,7 @@ export function nycWithholding(wages: Cents, frequency: PayFrequency, w4: NyIt21
   if (w4.exempt || !w4.nycResident) return 0;
   const t = NYC_2026;
   const periods = PAY_PERIODS[frequency];
-  const annualNet = Math.max(0, wages * periods - t.annualDeduction[w4.status] - t.annualExemption * w4.allowances);
+  const annualNet = Math.max(0, wages * periods - t.annualDeduction[w4.status] - t.annualExemption * (w4.nycAllowances ?? w4.allowances));
   return roundCents(taxFromBracket(t.schedule, annualNet) / periods) + (w4.additionalNyc ?? 0);
 }
 
