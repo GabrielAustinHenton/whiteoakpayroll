@@ -1,0 +1,24 @@
+:root {
+  --bg: #fbfaf7;
+  --fg: #1f2a24;
+  --muted: #5c6b62;
+  --accent: #2f5d3a;
+  --line: #e2e0d8;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #141a16; --fg: #e8ece9; --muted: #a3b1a8; --accent: #8fc79b; --line: #2b352f; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, sans-serif; }
+main { max-width: 960px; margin: 0 auto; padding: 24px 16px 64px; }
+.site-header { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.site-header nav { display: flex; gap: 16px; }
+a { color: var(--accent); }
+.brand { font-weight: 700; text-decoration: none; }
+table { border-collapse: collapse; width: 100%; }
+th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+.big { font-size: 2rem; font-weight: 700; }
+input { font: inherit; padding: 6px 8px; width: 8rem; }
+.table-wrap { overflow-x: auto; }
