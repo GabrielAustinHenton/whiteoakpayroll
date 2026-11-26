@@ -3,6 +3,8 @@ import { db } from "@/lib/db";
 import { requireArea } from "@/lib/auth/session";
 import { Notice, messages, prettyDate, usd } from "@/components/ui";
 import type { LineDetail } from "@/lib/app/engine";
+import { feeForRun } from "@/lib/app/payroll-service";
+import { PRICING } from "@/lib/pricing";
 import type { TaxLine } from "@/lib/tax-engine";
 import { DEDUCTION_LABELS } from "@/lib/pay-run/review";
 import { approveRun, deleteDraftRun, removeContractorPayment, saveRunInputs, voidOrReissueCheck } from "../../actions";
@@ -29,6 +31,8 @@ export default async function PayRunPage({ params, searchParams }: { params: Pro
   });
   if (!run) notFound();
   const contractors = await db.contractor.findMany({ where: { companyId, status: "ACTIVE" } });
+  const fee = await feeForRun(run.id);
+  const monthName = new Date(`${fee.month}-01T00:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", month: "long", year: "numeric" });
   const checks = await db.check.findMany({
     where: { companyId, OR: [{ payRunLine: { payRunId: runId } }, { contractorPayment: { payRunId: runId } }] },
     orderBy: { number: "asc" },
@@ -177,6 +181,17 @@ export default async function PayRunPage({ params, searchParams }: { params: Pro
           </tbody></table>
         </div>
       </div>
+      <div className="card">
+        <p className="big">{usd(fee.bill.total)}</p>
+        <p>
+          <b>White Oak Payroll fee for {monthName}</b>: {fee.bill.tierRange ? `${fee.people} ${fee.people === 1 ? "person" : "people"} paid this month, tier ${fee.bill.tier} (${fee.bill.tierRange.from} to ${fee.bill.tierRange.to} people) at ${usd(PRICING.pricePerTier)}` : "nobody paid yet this month"}
+          {fee.bill.addOns.length > 0 && ` plus ${fee.bill.addOns.map((a) => `${a.name} ${usd(a.price)}`).join(", ")}`}.
+        </p>
+        <p className="small muted">
+          One flat monthly fee, billed separately on {prettyDate(fee.billedOn)}. It is not part of this pay run&apos;s cash, and running payroll again this month for the same people does not raise it. No per-employee or per-run fees. <a href={`/app/${companyId}/billing`}>Plan and billing</a>
+        </p>
+      </div>
+
       <h3>Where the money goes</h3>
       <table><tbody>
         <tr><td>Net pay by direct deposit</td><td className="num">{usd(net)}</td></tr>
