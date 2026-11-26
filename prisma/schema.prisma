@@ -1,7 +1,10 @@
 // White Oak Payroll data model. Money is stored as integer cents.
+// Standard Postgres only (no host-specific extensions) so the database can move hosts.
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  // native for Vercel/dev, musl for the Alpine Docker image.
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
@@ -10,11 +13,10 @@ datasource db {
 }
 
 enum Role {
-  PLATFORM_ADMIN
-  PAYROLL_ADMIN
-  CLIENT_HR // limited: onboard and offboard employees only
-  EMPLOYEE
-  CONTRACTOR
+  PLATFORM_ADMIN // White Oak staff: every company
+  CLIENT_OWNER // the business owner: payroll, bank, taxes, billing
+  CLIENT_HR // limited: onboard and offboard employees and contractors only
+  EMPLOYEE // employee portal: own paystubs, W-2s, advances
 }
 
 enum PayFrequency {
@@ -37,10 +39,9 @@ enum WorkerStatus {
 
 enum PayRunStatus {
   DRAFT
-  PREVIEWED
   APPROVED
   PAID
-  FAILED
+  VOIDED
 }
 
 enum AddOn {
@@ -48,52 +49,93 @@ enum AddOn {
   PTO
 }
 
+enum AdvanceStatus {
+  REQUESTED
+  ACTIVE
+  REPAID
+  DECLINED
+}
+
+model User {
+  id           String       @id @default(cuid())
+  email        String       @unique
+  name         String
+  /** scrypt hash: salt:hash, hex. */
+  passwordHash String
+  /** Only White Oak staff. Client roles live on Membership. */
+  isPlatformAdmin Boolean   @default(false)
+  createdAt    DateTime     @default(now())
+  memberships  Membership[]
+  sessions     Session[]
+  employee     Employee?
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  /** SHA-256 of the cookie token; the token itself is never stored. */
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
 model Company {
-  id                 String          @id @default(cuid())
-  legalName          String
-  ein                String          @unique
-  providerCompanyId  String?         @unique
-  createdAt          DateTime        @default(now())
-  stateAccounts      StateAccount[]
-  memberships        Membership[]
-  paySchedules       PaySchedule[]
-  employees          Employee[]
-  contractors        Contractor[]
-  payRuns            PayRun[]
-  modules            CompanyModule[]
-  filings            Filing[]
-  retirementSettings RetirementSetting[]
+  id            String          @id @default(cuid())
+  legalName     String
+  tradeName     String?
+  ein           String
+  addressLine1  String
+  city          String
+  state         String
+  zip           String
+  /** Bank account the payroll is funded from (stub until TD Bank is integrated). Last 4 only. */
+  bankName      String?
+  bankLast4     String?
+  /** 941 depositor schedule: MONTHLY or SEMIWEEKLY. */
+  depositSchedule String        @default("MONTHLY")
+  /** Next paper check number to print. */
+  nextCheckNumber Int           @default(1001)
+  createdAt     DateTime        @default(now())
+  stateAccounts StateAccount[]
+  memberships   Membership[]
+  paySchedules  PaySchedule[]
+  employees     Employee[]
+  contractors   Contractor[]
+  payRuns       PayRun[]
+  modules       CompanyModule[]
+  filings       Filing[]
+  invoices      Invoice[]
+  auditLogs     AuditLog[]
+  checks        Check[]
 }
 
 model StateAccount {
-  id                 String  @id @default(cuid())
-  companyId          String
-  company            Company @relation(fields: [companyId], references: [id])
-  state              String // CT, MA, OR, NY
-  withholdingAccount String?
+  id                  String  @id @default(cuid())
+  companyId           String
+  company             Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  state               String // CT, MA, OR, NY
+  withholdingAccount  String?
   unemploymentAccount String?
-  sutaRate           Float
-  sutaWageBaseCents  Int
-  /** Uploaded state approval for less frequent pay (CT monthly/semi-monthly). */
+  /** Assigned unemployment rate, e.g. 0.03. */
+  suiRate             Float
+  suiWageBaseCents    Int
+  /** CT: Labor Commissioner approval for pay less often than bi-weekly. */
   lessFrequentPayApproval Boolean @default(false)
+  /** OR only: work site in the TriMet or Lane Transit District (trimet | lane). */
+  orTransitDistrict   String?
 
   @@unique([companyId, state])
 }
 
-model User {
-  id          String       @id @default(cuid())
-  email       String       @unique
-  mfaEnabled  Boolean      @default(false)
-  memberships Membership[]
-}
-
 model Membership {
-  id        String  @id @default(cuid())
+  id        String   @id @default(cuid())
   userId    String
-  user      User    @relation(fields: [userId], references: [id])
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   companyId String
-  company   Company @relation(fields: [companyId], references: [id])
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   role      Role
+  createdAt DateTime @default(now())
 
   @@unique([userId, companyId])
 }
@@ -101,7 +143,7 @@ model Membership {
 model CompanyModule {
   id        String   @id @default(cuid())
   companyId String
-  company   Company  @relation(fields: [companyId], references: [id])
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   addOn     AddOn
   enabledAt DateTime @default(now())
 
@@ -109,157 +151,238 @@ model CompanyModule {
 }
 
 model PaySchedule {
-  id        String       @id @default(cuid())
-  companyId String
-  company   Company      @relation(fields: [companyId], references: [id])
-  name      String
-  frequency PayFrequency
+  id           String       @id @default(cuid())
+  companyId    String
+  company      Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name         String
+  frequency    PayFrequency
+  /** A payday on this schedule; later paydays step forward from it. */
   anchorPayday DateTime
-  employees Employee[]
-  payRuns   PayRun[]
+  /** Days between period end and payday. */
+  payLagDays   Int          @default(5)
+  employees    Employee[]
+  payRuns      PayRun[]
 }
 
 model Employee {
-  id                 String       @id @default(cuid())
-  companyId          String
-  company            Company      @relation(fields: [companyId], references: [id])
-  payScheduleId      String
-  paySchedule        PaySchedule  @relation(fields: [payScheduleId], references: [id])
-  providerEmployeeId String?      @unique
-  firstName          String
-  lastName           String
-  birthDate          DateTime
-  hireDate           DateTime
-  terminationDate    DateTime?
-  terminationReason  String?
-  status             WorkerStatus @default(ONBOARDING)
-  workState          String
-  payBasis           PayBasis
-  payRateCents       Int // hourly rate or annual salary
-  nyManualWorker     Boolean      @default(false)
-  electronicW2Consent Boolean     @default(false)
-  payRunLines        PayRunLine[]
-  advances           Advance[]
-  retirementElections RetirementElection[]
-  sickLeaveLedger    SickLeaveEntry[]
+  id               String       @id @default(cuid())
+  companyId        String
+  company          Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  payScheduleId    String
+  paySchedule      PaySchedule  @relation(fields: [payScheduleId], references: [id])
+  /** Portal login, created when the employee is invited. */
+  userId           String?      @unique
+  user             User?        @relation(fields: [userId], references: [id])
+  firstName        String
+  lastName         String
+  email            String
+  /** Preview mode only accepts test SSNs (000-xx-xxxx). Encrypt before real data. */
+  ssn              String
+  birthDate        DateTime
+  hireDate         DateTime
+  terminationDate  DateTime?
+  terminationReason String?
+  status           WorkerStatus @default(ONBOARDING)
+  addressLine1     String
+  city             String
+  state            String
+  zip              String
+  workState        String
+  /** NY only: NYC or YONKERS resident for local withholding. */
+  localJurisdiction String?
+  payBasis         PayBasis
+  /** Hourly rate, or annual salary, in cents. */
+  payRateCents     Int
+  defaultHours     Float        @default(80)
+  nyManualWorker   Boolean      @default(false)
+  // Federal Form W-4 (2020 or later)
+  w4FilingStatus   String       @default("single") // single | married_jointly | head_of_household
+  w4MultipleJobs   Boolean      @default(false)
+  w4DependentsCents Int         @default(0)
+  w4OtherIncomeCents Int        @default(0)
+  w4DeductionsCents Int         @default(0)
+  w4ExtraCents     Int          @default(0)
+  w4Exempt         Boolean      @default(false)
+  /** State withholding certificate (CT-W4, M-4, OR-W-4, IT-2104) as entered. */
+  stateW4          Json?
+  i9CompletedAt    DateTime?
+  /** Direct deposit (stub until TD Bank). Last 4 only. */
+  bankLast4        String?
+  /** DIRECT_DEPOSIT or CHECK (printed paper check). */
+  paymentMethod    String       @default("DIRECT_DEPOSIT")
+  /** Pre-tax 401(k) percent of gross, e.g. 0.05. */
+  retirementPretaxRate Float    @default(0)
+  /** Section 125 health premium per paycheck, cents. */
+  healthPremiumCents Int        @default(0)
+  electronicW2Consent Boolean   @default(true)
+  createdAt        DateTime     @default(now())
+  payRunLines      PayRunLine[]
+  advances         Advance[]
 }
 
 model Contractor {
-  id                   String       @id @default(cuid())
-  companyId            String
-  company              Company      @relation(fields: [companyId], references: [id])
-  providerContractorId String?      @unique
-  legalName            String
-  tinType              String // ssn | ein
-  tinVerified          Boolean      @default(false)
-  w9ReceivedAt         DateTime?
-  electronic1099Consent Boolean     @default(false)
-  status               WorkerStatus @default(ONBOARDING)
-  payments             ContractorPayment[]
+  id               String       @id @default(cuid())
+  companyId        String
+  company          Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  legalName        String
+  businessName     String?
+  email            String
+  /** ssn | ein. Preview mode only accepts test numbers. */
+  tinType          String
+  tin              String
+  addressLine1     String
+  city             String
+  state            String
+  zip              String
+  w9ReceivedAt     DateTime?
+  bankLast4        String?
+  /** DIRECT_DEPOSIT or CHECK. */
+  paymentMethod    String       @default("DIRECT_DEPOSIT")
+  status           WorkerStatus @default(ACTIVE)
+  createdAt        DateTime     @default(now())
+  payments         ContractorPayment[]
 }
 
 model ContractorPayment {
-  id                  String     @id @default(cuid())
-  contractorId        String
-  contractor          Contractor @relation(fields: [contractorId], references: [id])
-  amountCents         Int
-  backupWithholdingCents Int     @default(0)
-  paidOn              DateTime
+  id           String     @id @default(cuid())
+  contractorId String
+  contractor   Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  payRunId     String?
+  payRun       PayRun?    @relation(fields: [payRunId], references: [id], onDelete: SetNull)
+  amountCents  Int
+  memo         String?
+  paidOn       DateTime
+  checks       Check[]
 }
 
 model PayRun {
-  id               String       @id @default(cuid())
-  companyId        String
-  company          Company      @relation(fields: [companyId], references: [id])
-  payScheduleId    String
-  paySchedule      PaySchedule  @relation(fields: [payScheduleId], references: [id])
-  periodStart      DateTime
-  periodEnd        DateTime
-  payday           DateTime
-  offCycle         Boolean      @default(false)
-  status           PayRunStatus @default(DRAFT)
-  providerPayrollId String?     @unique
-  approvedById     String?
-  approvedAt       DateTime?
-  lines            PayRunLine[]
+  id             String       @id @default(cuid())
+  companyId      String
+  company        Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  payScheduleId  String
+  paySchedule    PaySchedule  @relation(fields: [payScheduleId], references: [id])
+  periodStart    DateTime
+  periodEnd      DateTime
+  payday         DateTime
+  offCycle       Boolean      @default(false)
+  status         PayRunStatus @default(DRAFT)
+  /** Full engine review at approval time: lines, totals, cash breakdown. */
+  summary        Json?
+  grossCents     Int          @default(0)
+  employerTaxesCents Int      @default(0)
+  netCents       Int          @default(0)
+  cashNeededCents Int         @default(0)
+  approvedById   String?
+  approvedAt     DateTime?
+  /** Stub money movement reference (TD Bank not integrated). */
+  fundingRef     String?
+  createdAt      DateTime     @default(now())
+  lines          PayRunLine[]
+  contractorPayments ContractorPayment[]
 }
 
 model PayRunLine {
-  id                   String   @id @default(cuid())
-  payRunId             String
-  payRun               PayRun   @relation(fields: [payRunId], references: [id])
-  employeeId           String
-  employee             Employee @relation(fields: [employeeId], references: [id])
-  hours                Float?
-  grossCents           Int
-  employeeTaxesCents   Int
-  employerTaxesCents   Int
-  /** Per-tax employer breakdown shown in the cost preview: { social_security, medicare, futa, suta, ... } */
-  employerTaxDetail    Json
-  deductionsCents      Int
-  netCents             Int
+  id           String   @id @default(cuid())
+  payRunId     String
+  payRun       PayRun   @relation(fields: [payRunId], references: [id], onDelete: Cascade)
+  employeeId   String
+  employee     Employee @relation(fields: [employeeId], references: [id])
+  hours        Float?
+  regularCents Int
+  bonusCents   Int      @default(0)
+  grossCents   Int      @default(0)
+  employeeTaxesCents Int @default(0)
+  employerTaxesCents Int @default(0)
+  deductionsCents Int   @default(0)
+  netCents     Int      @default(0)
+  /** Engine output for this paycheck: tax lines, deductions, taxable wages. Paystub source. */
+  detail       Json?
+  checks       Check[]
+
+  @@unique([payRunId, employeeId])
 }
 
 model Advance {
-  id                 String   @id @default(cuid())
-  employeeId         String
-  employee           Employee @relation(fields: [employeeId], references: [id])
-  principalCents     Int
-  installmentCents   Int
-  repaidCents        Int      @default(0)
-  /** Signed authorization stored with the record; required before any deduction. */
-  authorizationDocId String?
-  issuedAt           DateTime @default(now())
-  closedAt           DateTime?
-}
-
-model RetirementSetting {
-  id        String  @id @default(cuid())
-  companyId String
-  company   Company @relation(fields: [companyId], references: [id])
-  /** MYCTSAVINGS | OREGONSAVES | EMPLOYER_401K | EMPLOYER_403B */
-  program   String
-  /** Employer certified it offers a qualified plan (exempts it from the state program). */
-  exemptByQualifiedPlan Boolean @default(false)
-  defaultRate Float
-}
-
-model RetirementElection {
-  id         String   @id @default(cuid())
-  employeeId String
-  employee   Employee @relation(fields: [employeeId], references: [id])
-  program    String
-  rate       Float // 0 = opted out
-  rothOrPreTax String // ROTH | PRETAX
-  effective  DateTime
-}
-
-model SickLeaveEntry {
-  id         String   @id @default(cuid())
-  employeeId String
-  employee   Employee @relation(fields: [employeeId], references: [id])
-  /** Positive = accrued, negative = used. */
-  hours      Float
-  reason     String // ACCRUAL | USE | CARRYOVER | ADJUSTMENT
-  payRunId   String?
-  createdAt  DateTime @default(now())
+  id               String        @id @default(cuid())
+  employeeId       String
+  employee         Employee      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  principalCents   Int
+  installmentCents Int
+  repaidCents      Int           @default(0)
+  status           AdvanceStatus @default(REQUESTED)
+  /** Employee typed their name to sign the repayment authorization. */
+  authorizationSignedName String?
+  authorizationSignedAt   DateTime?
+  requestedAt      DateTime      @default(now())
+  decidedAt        DateTime?
 }
 
 model Filing {
-  id        String   @id @default(cuid())
-  companyId String
-  company   Company  @relation(fields: [companyId], references: [id])
-  form      String // 941, 940, W-2, W-3, 1099-NEC, CT-941, M-941, OQ, NYS-45, MTA-305
-  period    String // e.g. 2026-Q1 or 2026
-  status    String   @default("pending")
-  filedAt   DateTime?
+  id         String    @id @default(cuid())
+  companyId  String
+  company    Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /** 941, 940, W-2, W-3, 1099-NEC, 1096, CT-941, CT-W3, M-941, OQ, NYS-45 */
+  form       String
+  /** 2026-Q1 or 2026 */
+  period     String
+  /** Per-recipient forms (W-2, 1099-NEC) name the person. */
+  recipient  String?
+  status     String    @default("generated") // generated | filed
+  /** Every figure the PDF was drawn from, so the archive can be audited without regenerating. */
+  data       Json
+  pdf        Bytes
+  generatedAt DateTime @default(now())
+  filedAt    DateTime?
+
+  @@index([companyId, period])
+}
+
+model Invoice {
+  id          String   @id @default(cuid())
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  month       String // 2026-11
+  peoplePaid  Int
+  tier        Int
+  totalCents  Int
+  lines       Json
+  createdAt   DateTime @default(now())
+
+  @@unique([companyId, month])
 }
 
 model AuditLog {
   id        String   @id @default(cuid())
-  actorId   String
+  actorId   String?
   companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
   action    String
-  detail    Json
+  detail    Json?
   createdAt DateTime @default(now())
+}
+
+enum CheckStatus {
+  ISSUED
+  VOID
+}
+
+/** A printed paper check, for a paycheck or a contractor payment. Voided checks are kept; a reissue gets a new number. */
+model Check {
+  id                  String             @id @default(cuid())
+  companyId           String
+  company             Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  payRunLineId        String?
+  payRunLine          PayRunLine?        @relation(fields: [payRunLineId], references: [id], onDelete: Cascade)
+  contractorPaymentId String?
+  contractorPayment   ContractorPayment? @relation(fields: [contractorPaymentId], references: [id], onDelete: Cascade)
+  number              Int
+  payee               String
+  amountCents         Int
+  checkDate           DateTime
+  status              CheckStatus        @default(ISSUED)
+  voidReason          String?
+  voidedAt            DateTime?
+  createdAt           DateTime           @default(now())
+
+  @@unique([companyId, number])
 }

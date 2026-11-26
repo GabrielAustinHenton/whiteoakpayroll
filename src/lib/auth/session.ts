@@ -1,0 +1,77 @@
+import { createHash, randomBytes } from "node:crypto";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
+import type { Role } from "@prisma/client";
+import { db } from "../db";
+
+const COOKIE = "wo_session";
+const DAYS = 14;
+
+const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
+
+/** Start a session: random token in an httpOnly cookie, only its hash in the database. */
+export async function startSession(userId: string) {
+  const token = randomBytes(32).toString("base64url");
+  const expiresAt = new Date(Date.now() + DAYS * 86_400_000);
+  await db.session.create({ data: { userId, tokenHash: sha256(token), expiresAt } });
+  (await cookies()).set(COOKIE, token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+    expires: expiresAt,
+  });
+}
+
+export async function endSession() {
+  const jar = await cookies();
+  const token = jar.get(COOKIE)?.value;
+  if (token) await db.session.deleteMany({ where: { tokenHash: sha256(token) } });
+  jar.delete(COOKIE);
+}
+
+export async function currentUser() {
+  const token = (await cookies()).get(COOKIE)?.value;
+  if (!token) return null;
+  const s = await db.session.findUnique({ where: { tokenHash: sha256(token) }, include: { user: { include: { memberships: true } } } });
+  if (!s || s.expiresAt < new Date()) return null;
+  return s.user;
+}
+
+export type CurrentUser = NonNullable<Awaited<ReturnType<typeof currentUser>>>;
+
+export async function requireUser(): Promise<CurrentUser> {
+  const u = await currentUser();
+  if (!u) redirect("/login");
+  return u;
+}
+
+/** Areas of a company account and which roles can use them. */
+export type Area = "dashboard" | "people" | "payroll" | "filings" | "settings" | "billing" | "team" | "advances";
+
+const AREAS: Record<Exclude<Role, "PLATFORM_ADMIN">, Area[]> = {
+  CLIENT_OWNER: ["dashboard", "people", "payroll", "filings", "settings", "billing", "team", "advances"],
+  // Client HR: onboard and offboard only. No payroll, bank, tax or billing access.
+  CLIENT_HR: ["dashboard", "people"],
+  EMPLOYEE: [],
+};
+
+/** The caller's role in a company: PLATFORM_ADMIN for White Oak staff, else their membership role. */
+export function roleIn(user: CurrentUser, companyId: string): Role | null {
+  if (user.isPlatformAdmin) return "PLATFORM_ADMIN";
+  return user.memberships.find((m) => m.companyId === companyId)?.role ?? null;
+}
+
+export function canUse(role: Role | null, area: Area): boolean {
+  if (!role) return false;
+  if (role === "PLATFORM_ADMIN") return true;
+  return AREAS[role].includes(area);
+}
+
+/** Gate a company page or action. Redirects away when the caller lacks access. */
+export async function requireArea(companyId: string, area: Area) {
+  const user = await requireUser();
+  const role = roleIn(user, companyId);
+  if (!canUse(role, area)) redirect(role ? `/app/${companyId}` : "/app");
+  return { user, role: role! };
+}

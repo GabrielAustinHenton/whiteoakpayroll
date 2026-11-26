@@ -23,13 +23,19 @@ Next.js (App Router, TypeScript), PostgreSQL with Prisma, Vitest. Tax calculatio
 | `src/lib/payroll/advances.ts` | Zero-interest payday advances repaid by payroll deduction (CT only for now) |
 | `prisma/schema.prisma` | Data model: companies, roles, employees, contractors, pay runs, advances, retirement, sick leave, filings |
 | `src/app/` | Marketing pages, pricing calculator, sample pay run cost preview |
+| `src/app/signup`, `login`, `app/[companyId]/…` | The payroll app: self-serve signup, company settings, people (employees, contractors, W-4 and state forms, I-9, offboarding), pay runs (review, approve, paystubs, paper checks), tax filings archive, advances, team access, billing |
+| `src/app/me`, `src/app/admin` | Employee portal (paystubs, W-2s, advances) and White Oak admin |
+| `src/lib/app/` | App services: engine adapter (`engine.ts`), pay periods, pay runs and checks (`payroll-service.ts`), completed forms (`filing-docs.ts`), paystubs |
+| `src/lib/pdf/` | PDF rendering for completed forms, paystubs and voucher checks |
+| `src/lib/auth/` | Password hashing and database sessions; roles: White Oak admin, client owner, client HR (onboard/offboard only), employee |
 
 ## Develop
 
 ```bash
 npm install
 cp .env.example .env   # point DATABASE_URL at a local Postgres
-npm run dev            # http://localhost:3000
+npx prisma migrate dev # create the tables
+npm run dev            # http://localhost:3000, then /signup
 npm test
 npm run typecheck
 ```

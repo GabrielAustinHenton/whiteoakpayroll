@@ -1,6 +1,6 @@
 # Deploying whiteoakpayroll.com
 
-The site is a Next.js app and every page is static today, so it needs no database or secrets to deploy.
+The site is a Next.js app. Marketing pages work without a database; the app itself needs Postgres (below).
 
 ## Vercel (recommended)
 
@@ -25,6 +25,29 @@ The site is a Next.js app and every page is static today, so it needs no databas
 Set both records to **DNS only** (grey cloud). Cloudflare's proxy is not needed for SSL and can break
 Vercel's certificate renewal.
 
+## Turning on the app (database and sign-in)
+
+The app (sign up, companies, people, pay runs, paystubs, checks, filings) needs a Postgres database.
+Use Neon through Vercel; it is standard Postgres, so it can move later.
+
+1. In Vercel, open the **whiteoakpayroll** project and click the **Storage** tab.
+2. Click **Create Database**, choose **Neon** (Serverless Postgres), accept the free plan, pick the region
+   closest to you (US East is fine), and click **Create**.
+3. When asked which environments to connect, keep **Production**, **Preview** and **Development** checked
+   and click **Connect**. This adds `DATABASE_URL` (and `DATABASE_URL_UNPOOLED`) to the project.
+4. Open **Settings → Environment Variables** and add:
+
+   | Name | Value |
+   |------|-------|
+   | `ADMIN_SETUP_TOKEN` | any long random phrase you keep private (12+ characters) |
+
+   `TEST_IDS_ONLY` is on by default: only test SSNs (000-xx-xxxx) and EINs (00-xxxxxxx) are accepted
+   until SSNs are encrypted and the security review is done. Do not set it to `false` before then.
+5. Merge the pull request (or, if already merged, open **Deployments**, click **⋯** on the latest one and
+   **Redeploy**). The build creates the database tables automatically (`prisma migrate deploy`).
+6. Go to https://whiteoakpayroll.com/signup and create the first company. To make that login a White Oak
+   admin (sees every client), go to https://whiteoakpayroll.com/admin/claim and enter `ADMIN_SETUP_TOKEN`.
+
 ## Moving off Vercel later
 
 The app is kept portable so it can move hosts without code changes:
@@ -38,5 +61,6 @@ The app is kept portable so it can move hosts without code changes:
 
 ## Before handling real payroll data
 
-This deploy is a public preview. Before any real employee data, see the go-live list in the project thread:
-embedded payroll provider (e.g. Check), managed Postgres, auth, security review, and legal review.
+This deploy is a public preview. Before any real employee data: encrypt SSNs and bank numbers at rest,
+add two-factor sign-in, connect TD Bank for money movement, finish IRS/state registrations
+(docs/registrations.md), and complete a security and legal review.
