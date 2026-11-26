@@ -1,11 +1,15 @@
 // Applies database migrations during the build when a database is configured.
-// Without DATABASE_URL (e.g. a fork's preview build) it skips, so marketing pages still build.
-// Neon (and other poolers) give a direct, unpooled URL for migrations; use it when present.
+// Without a database URL (e.g. a fork's preview build) it skips, so marketing pages still build.
+// Prefers the direct (unpooled) URL for migrations. Accepts the names Vercel's Neon integration
+// creates with prefix DATABASE (recommended), POSTGRES or STORAGE.
 import { execSync } from "node:child_process";
 
-const direct = process.env.DATABASE_URL_UNPOOLED || process.env.POSTGRES_URL_NON_POOLING || process.env.DATABASE_URL;
-if (!direct) {
-  console.log("DATABASE_URL not set: skipping prisma migrate deploy.");
+const e = process.env;
+const url =
+  e.DATABASE_URL_UNPOOLED || e.POSTGRES_URL_NON_POOLING || e.STORAGE_URL_UNPOOLED ||
+  e.DATABASE_URL || e.POSTGRES_PRISMA_URL || e.POSTGRES_URL || e.STORAGE_URL;
+if (!url) {
+  console.log("No database URL set: skipping prisma migrate deploy.");
 } else {
-  execSync("npx prisma migrate deploy", { stdio: "inherit", env: { ...process.env, DATABASE_URL: direct } });
+  execSync("npx prisma migrate deploy", { stdio: "inherit", env: { ...e, DATABASE_URL: url } });
 }

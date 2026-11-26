@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import "./globals.css";
 import { currentUser } from "@/lib/auth/session";
+import { databaseUrl } from "@/lib/db-url";
 import { logout } from "./auth-actions";
 
 export const metadata: Metadata = {
@@ -11,7 +12,7 @@ export const metadata: Metadata = {
 
 async function safeUser() {
   // The marketing pages still render when no database is configured.
-  if (!process.env.DATABASE_URL) return null;
+  if (!databaseUrl()) return null;
   try {
     return await currentUser();
   } catch {
