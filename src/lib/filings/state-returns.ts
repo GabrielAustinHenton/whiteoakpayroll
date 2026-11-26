@@ -151,3 +151,46 @@ export function nys45(all: PaycheckRecord[], year: number, quarter: 1 | 2 | 3 | 
     }),
   };
 }
+
+/**
+ * CT-W3, Connecticut Annual Reconciliation of Withholding, due January 31 and filed electronically
+ * in myconneCT. The W-2s (state copies) go to DRS with it, uploaded in SSA EFW2 format; 1099s that
+ * show CT withholding are reported too. Line labels follow the 2025 form: VERIFY against the 2026 form.
+ */
+export interface CTW3 {
+  year: number;
+  w2Count: number;
+  form1099Count: number;
+  line1_grossCtWages: Cents;
+  line2_ctTaxWithheldW2: Cents;
+  line3_ctTaxWithheld1099: Cents;
+  line4_totalCtTaxWithheld: Cents;
+  line5_paidForYear: Cents;
+  line6_balanceDue: Cents;
+  line7_overpayment: Cents;
+}
+
+export function ctW3(
+  w2s: { states: { state: string; stateWages: Cents; stateTax: Cents }[] }[],
+  forms1099: { box5_stateTaxWithheld: Cents; box6_statePayerNumber: string; contractor: { state?: string } }[],
+  year: number,
+  paidForYear: Cents,
+): CTW3 {
+  const ct = w2s.flatMap((w) => w.states.filter((s) => s.state === "CT"));
+  const ct1099 = forms1099.filter((f) => f.contractor.state === "CT" && f.box5_stateTaxWithheld > 0);
+  const w2Tax = ct.reduce((s, x) => s + x.stateTax, 0);
+  const t1099 = ct1099.reduce((s, f) => s + f.box5_stateTaxWithheld, 0);
+  const total = w2Tax + t1099;
+  return {
+    year,
+    w2Count: ct.length,
+    form1099Count: ct1099.length,
+    line1_grossCtWages: ct.reduce((s, x) => s + x.stateWages, 0),
+    line2_ctTaxWithheldW2: w2Tax,
+    line3_ctTaxWithheld1099: t1099,
+    line4_totalCtTaxWithheld: total,
+    line5_paidForYear: paidForYear,
+    line6_balanceDue: Math.max(0, total - paidForYear),
+    line7_overpayment: Math.max(0, paidForYear - total),
+  };
+}
