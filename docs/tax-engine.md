@@ -28,11 +28,16 @@ All money is in integer cents. Tax figures live only in `src/lib/tax-engine/tabl
 | State deposit thresholds (CT, MA, NY) | `filings/deposits.ts` | Due-date rules partly from memory |
 | EFW2 RT/RF/RS positions; RO/RU not written | `filings/efw2.ts` | Run AccuWage on every file |
 | 1099-NEC $2,000 threshold | `filings/form1099nec.ts` | OBBBA change; confirm in 2026 instructions |
+| MeF 94x element names and versions (`2026Q1v4.0`, `2026v3.0`) | `efile/mef/94x.ts` | Written from IRS guides without the XSDs; validate with xmllint against the TY2026 94x schemas before ATS |
+| IRIS 1099-NEC XML element names | `efile/iris/1099nec.ts` | IRIS schemas need a TCC to download |
+| CT W-2 and 1099 file positions, NEC amount codes | `efile/ct/files.ts` | From DRS 2026 specs marked DRAFT; NEC amount codes follow Pub. 1220 |
 | CT-W3 line numbers | `filings/state-returns.ts` | Based on the 2025 form; the 2026 form was not posted yet |
 
 ## Not built yet
 - Oregon Workers' Benefit Fund (needs hours worked); Portland Metro SHS and Multnomah PFA local withholding.
 - Multi-state workers (resident and work state differ), reciprocity, and NY convenience-of-employer rules.
 - MA supplemental-wage method, CT and NY supplemental elections (flat rates are in the tables).
-- State W-2 transmittals for MA and OR (WR); CT-W3 is built, its W-2 upload uses the EFW2 writer without RS records yet, CT and MA UI wage reports, PDF rendering, MeF 94x XML.
+- State W-2 transmittals for MA and OR (WR); CT and MA UI wage reports, PDF rendering.
 - EFTPS and state payment files; TD Bank integration.
+- CSV uploads for CT-941/CT-W3/CT-1096 (keying worksheets for now); e-file formats for M-941, OR OQ/WR, NYS-45.
+- The live MeF A2A (SOAP) and IRIS A2A (REST + OAuth JWT) clients. Interfaces exist; they wait on credentials.

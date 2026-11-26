@@ -14,10 +14,10 @@ export const EFW2_SOURCE: Source = {
   note: "RA, RE (incl. new Signature PIN 319-328) and RW 1-489 positions match the 2026 spec summary. RT, RF and RS positions are from the prior-year layout. RO/RU (box 12 codes A/B split, J/K/L/P, TA/TP/TT) and the RW box 14b tipped occupation codes are not written yet. Validate every file with SSA AccuWage Online before upload.",
 };
 
-class Rec {
+export class Rec {
   private buf: string[];
-  constructor(id: string) {
-    this.buf = Array(512).fill(" ");
+  constructor(id: string, length = 512) {
+    this.buf = Array(length).fill(" ");
     this.alpha(1, 2, id);
   }
   /** Left-justified, blank-filled, uppercase. Positions are 1-based and inclusive, as in the spec. */
@@ -34,6 +34,11 @@ class Rec {
     const s = String(Math.round(cents));
     if (s.length > len) throw new Error(`Amount too large for ${start}-${end}`);
     return this.alpha(start, end, s.padStart(len, "0"));
+  }
+  /** Right-justified, blank-filled text (some state fields). */
+  alphaRight(start: number, end: number, v: string | undefined) {
+    const len = end - start + 1;
+    return this.alpha(start, end, (v ?? "").toUpperCase().slice(-len).padStart(len, " "));
   }
   digits(start: number, end: number, v: string | number) {
     const len = end - start + 1;

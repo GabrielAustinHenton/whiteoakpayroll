@@ -36,6 +36,19 @@ Allow 4 to 8 weeks for the federal items. IRS e-file approval and communications
 19. **MCTMT** (MTA-305) for clients in the MCTD whose quarterly payroll exceeds the threshold, under the same DTF access.
 20. NY disability (DBL) and Paid Family Leave are insurance. Each client must hold a policy from a carrier (or the State Insurance Fund). We withhold the employee share. Nothing to register for us.
 
+## E-filing: credentials, testing and who does what
+
+The e-file code is in `src/lib/efile/`. It builds every submission now. Nothing is sent until the credentials below exist, and the transmitters raise a "not configured" error until then. Each submission records its channel, files, status (draft, validated, ready_for_upload, transmitted, accepted, rejected) and the agency's receipt number.
+
+| Filing | Channel | Built now | Gabriel must get | Then |
+| --- | --- | --- | --- | --- |
+| 941 (+ Schedule B), 940 | IRS MeF A2A | XML return + manifest in a zip per IRS layout | IRS e-file application (Pub. 3112) with roles Reporting Agent, Transmitter, Software Developer, giving an **EFIN** and **ETIN**. A Reporting Agent **PIN** for signing. An e-Services **A2A system ID and strong-authentication certificate**. Form 8655 from each client. | Download the TY2026 94x schemas, align element names (`mef/94x.ts`), pass **MeF Assurance Testing** for 94x per **Pub. 5078** (e-help desk 866-255-0654). The IRS then issues our **Software ID**. |
+| 1099-NEC (with 1096 archived) | IRS IRIS A2A | IRIS XML transmission, UTID, 1096 kept with it | An **IRIS A2A TCC** (separate application in IRIS; FIRE is closed for TY2026). An **API client ID** registered in e-Services, with our **X.509 certificate / JWKS** for the OAuth JWT. | Download the IRIS schemas from the Secure Object Repository (needs the TCC), align `iris/1099nec.ts`, pass **IRIS ATS per Pub. 5719** (help desk 866-937-4130). Until then the IRIS Taxpayer Portal works for keying a few forms. |
+| W-2/W-3 | SSA BSO upload | EFW2 file, checked, marked ready to upload | **BSO user ID** with wage reporting (optional Employer Signature PIN). | Check each file in **AccuWage Online**, upload in BSO, record the WFID. SSA has no API, so this stays a manual upload. |
+| CT W-2 (state copy) and CT 1099 | myconneCT bulk upload | `CTTAX2026.txt` (RA/RE/RS/RT/RF) and the CT 1099 file (T/A/B/C/F, 750 bytes) | **myconneCT third-party bulk filer (TPBF)** login with each client linked. DRS issues no separate W-2 submitter code. | Upload the files, then file the CT-W3 and CT-1096 to complete the year. |
+| CT-941, CT-W3, CT-1096 | myconneCT | Keying worksheets with each form line | Same TPBF login | DRS publishes the CSV upload layouts as .xlsx files we could not read. Send a copy of them and the CSV export can replace the worksheets. |
+| M-941, OR OQ, NYS-45 | State portals | Return data only | Items 11, 14 and 17 above | E-file formats not built yet. |
+
 ## For each new client (onboarding checklist)
 - Signed Form 8655, plus each state's POA (CT LGL-001, MA M-2848, NY POA-1, Oregon's form).
 - The client's federal EIN and each state's withholding and UI account numbers, plus its assigned UI rate.
