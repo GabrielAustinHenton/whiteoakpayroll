@@ -22,3 +22,4 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .big { font-size: 2rem; font-weight: 700; }
 input { font: inherit; padding: 6px 8px; width: 8rem; }
 .table-wrap { overflow-x: auto; }
+.preview-banner { background: var(--accent); color: var(--bg); text-align: center; padding: 8px 16px; font-size: 0.9rem; }
