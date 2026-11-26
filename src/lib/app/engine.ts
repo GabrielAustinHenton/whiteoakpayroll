@@ -90,9 +90,12 @@ export function employeeStateCertificate(e: EmployeeTaxProfile): StateCertificat
   const has = Object.keys(raw).length > 0;
   switch (e.workState) {
     case "CT":
-      return { state: "CT", w4: { code: has && raw.code ? (raw.code as "A") : null, additional: num("additional") } };
+      return { state: "CT", w4: { code: has && raw.code ? (raw.code as "A") : null, additional: num("additional"), reduction: num("reduction") } };
     case "MA":
-      return { state: "MA", w4: { exemptions: num("exemptions"), headOfHousehold: bool("headOfHousehold"), additional: num("additional"), exempt: bool("exempt") } };
+      return {
+        state: "MA",
+        w4: { exemptions: num("exemptions"), headOfHousehold: bool("headOfHousehold"), blind: num("blind"), fullTimeStudentUnder8k: bool("fullTimeStudentUnder8k"), additional: num("additional"), exempt: bool("exempt") },
+      };
     case "OR":
       return {
         state: "OR",
@@ -106,7 +109,11 @@ export function employeeStateCertificate(e: EmployeeTaxProfile): StateCertificat
         w4: {
           status: raw.status === "married" ? "married" : "single",
           allowances: num("allowances"),
+          // IT-2104 line 2; older rows without it fall back to line 1 inside the engine.
+          nycAllowances: raw.nycAllowances === undefined ? undefined : num("nycAllowances"),
           additionalState: num("additionalState"),
+          additionalNyc: bool("nycResident") ? num("additionalNyc") : 0,
+          additionalYonkers: bool("yonkersResident") ? num("additionalYonkers") : 0,
           nycResident: bool("nycResident"),
           yonkersResident: bool("yonkersResident"),
           exempt: bool("exempt"),

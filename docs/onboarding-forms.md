@@ -47,7 +47,25 @@ year after termination, whichever is later (`i9RetainUntil`, 8 CFR 274a.2(b)(2)(
 Remote document examination (DHS alternative procedure) only for E-Verify employers in good
 standing, with copies kept of every document.
 
-## Storage and security needed (no database yet)
+## What is stored today
+
+- **SSNs are encrypted** with AES-256-GCM (`src/lib/security/field-crypto.ts`). The employee row keeps
+  `ssnEncrypted` and `ssnLast4`; the old plaintext `ssn` column is null for new saves and only read as
+  a fallback for test rows created before this change. The full SSN is decrypted only when building
+  filings. Set `FIELD_ENCRYPTION_KEY` before turning off `TEST_IDS_ONLY`; without a key the app uses a
+  fixed preview key that is only allowed while test SSNs are enforced.
+- **Form history**: each save that changes the W-4 or the state certificate adds a new
+  `W4Certificate` / `StateWithholdingCertificate` row and marks the previous one superseded.
+- **I-9**: `I9Record` tracks Section 1 and Section 2 completion, the Section 2 due date, the
+  reverification date, and the retention date (set on offboarding). Rehire within 3 years keeps
+  the original I-9 (Supplement B); later rehires start a new one. Document numbers and images are
+  not stored yet: the employer keeps the signed paper I-9.
+
+Still to do before real employees: move the key to a cloud KMS (envelope encryption), encrypt
+contractor TINs the same way, encrypted document storage for I-9 copies, employee self-service
+signing in the portal, and a nightly purge on `retainUntil`.
+
+## Full storage and security plan
 
 These forms carry the most sensitive data in the product: SSNs, dates of birth, immigration
 numbers, and images of passports and driver's licenses. Before any real employee uses onboarding:

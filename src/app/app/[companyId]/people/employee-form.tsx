@@ -1,11 +1,16 @@
-import type { Employee, PaySchedule } from "@prisma/client";
+import type { Employee, I9Record, PaySchedule } from "@prisma/client";
+import { exemptExpires, i9Deadlines } from "@/lib/onboarding";
+import { W4_FORM_YEAR, w4Prefill } from "@/lib/app/onboarding-records";
+import { ssnLast4 } from "@/lib/security/field-crypto";
 import { Field, StateSelect, dateStr } from "@/components/ui";
 import { FREQUENCY_LABEL, type Frequency } from "@/lib/app/periods";
 
 const d = (c: number | undefined) => (c ? (c / 100).toFixed(2) : "");
 
 /** Add / edit employee: personal, job and pay, federal W-4, state certificate, I-9, deposit, deductions. */
-export function EmployeeForm({ companyId, schedules, e, action, submit, companyState }: { companyId: string; schedules: PaySchedule[]; e?: Employee; action: (f: FormData) => Promise<void>; submit: string; companyState?: string }) {
+export function EmployeeForm({ companyId, schedules, e, action, submit, companyState, latestW4, i9 }: { companyId: string; schedules: PaySchedule[]; e?: Employee; action: (f: FormData) => Promise<void>; submit: string; companyState?: string; latestW4?: unknown; i9?: I9Record | null }) {
+  const step3 = w4Prefill(latestW4, e?.w4DependentsCents ?? 0);
+  const section2Due = i9 ? dateStr(i9.section2DueOn) : e ? i9Deadlines(dateStr(e.hireDate)).section2 : null;
   const s = (e?.stateW4 ?? {}) as Record<string, string | number | boolean>;
   const sv = (k: string) => (s[k] === undefined || s[k] === null ? "" : String(s[k]));
   const sm = (k: string) => (typeof s[k] === "number" && s[k] ? ((s[k] as number) / 100).toFixed(2) : "");
@@ -21,7 +26,7 @@ export function EmployeeForm({ companyId, schedules, e, action, submit, companyS
           <Field label="Email" hint="For the employee portal"><input name="email" type="email" defaultValue={e?.email} required /></Field>
         </div>
         <div className="row">
-          <Field label={e ? "SSN (leave blank to keep)" : "SSN"} hint={e ? `On file ending ${e.ssn.slice(-4)}` : "Test SSNs only: 000-xx-xxxx"}>
+          <Field label={e ? "SSN (leave blank to keep)" : "SSN"} hint={e ? `On file ending ${ssnLast4(e)} (stored encrypted)` : "Test SSNs only: 000-xx-xxxx. Stored encrypted."}>
             <input name="ssn" required={!e} placeholder="000-12-3456" />
           </Field>
           <Field label="Date of birth"><input type="date" name="birthDate" defaultValue={dateStr(e?.birthDate)} required /></Field>
@@ -68,7 +73,11 @@ export function EmployeeForm({ companyId, schedules, e, action, submit, companyS
               <option value="head_of_household">Head of household</option>
             </select>
           </Field>
-          <Field label="Step 3 dependents ($/year)"><input name="w4Dependents" inputMode="decimal" defaultValue={d(e?.w4DependentsCents)} /></Field>
+        </div>
+        <div className="row">
+          <Field label="3(a) qualifying children under 17" hint="x $2,200"><input name="w4Children" type="number" min={0} defaultValue={step3.children || ""} /></Field>
+          <Field label="3(b) other dependents" hint="x $500"><input name="w4OtherDependents" type="number" min={0} defaultValue={step3.otherDependents || ""} /></Field>
+          <Field label="Step 3 other credits ($/year)"><input name="w4OtherCredits" inputMode="decimal" defaultValue={d(step3.otherCreditsCents)} /></Field>
         </div>
         <label className="check"><input type="checkbox" name="w4MultipleJobs" defaultChecked={e?.w4MultipleJobs} /> Step 2(c): multiple jobs or spouse works</label>
         <div className="row">
@@ -76,7 +85,7 @@ export function EmployeeForm({ companyId, schedules, e, action, submit, companyS
           <Field label="4(b) deductions ($/year)"><input name="w4Deductions" inputMode="decimal" defaultValue={d(e?.w4DeductionsCents)} /></Field>
           <Field label="4(c) extra withholding ($/check)"><input name="w4Extra" inputMode="decimal" defaultValue={d(e?.w4ExtraCents)} /></Field>
         </div>
-        <label className="check"><input type="checkbox" name="w4Exempt" defaultChecked={e?.w4Exempt} /> Claims exemption from withholding (expires Feb 15 next year)</label>
+        <label className="check"><input type="checkbox" name="w4Exempt" defaultChecked={e?.w4Exempt} /> Claims exemption from withholding for {W4_FORM_YEAR} (a new W-4 is due by {exemptExpires(W4_FORM_YEAR)})</label>
       </fieldset>
 
       <fieldset>
@@ -99,6 +108,7 @@ export function EmployeeForm({ companyId, schedules, e, action, submit, companyS
                     </select>
                   </Field>
                   <Field label="Line 2 additional ($/check)"><input name={n("additional")} inputMode="decimal" defaultValue={m("additional")} /></Field>
+                  <Field label="Line 3 reduced ($/check)"><input name={n("reduction")} inputMode="decimal" defaultValue={m("reduction")} /></Field>
                 </div>
               )}
               {st === "MA" && (
@@ -107,7 +117,13 @@ export function EmployeeForm({ companyId, schedules, e, action, submit, companyS
                     <Field label="Total exemptions"><input name={n("exemptions")} type="number" min={0} defaultValue={v("exemptions")} /></Field>
                     <Field label="Additional ($/check)"><input name={n("additional")} inputMode="decimal" defaultValue={m("additional")} /></Field>
                   </div>
-                  <label className="check"><input type="checkbox" name={n("headOfHousehold")} defaultChecked={b("headOfHousehold")} /> Head of household</label>
+                  <div className="row">
+                    <Field label="Boxes B and C: blind (you and/or spouse)">
+                      <select name={n("blind")} defaultValue={v("blind") || "0"}><option value="0">None</option><option value="1">One</option><option value="2">Both</option></select>
+                    </Field>
+                  </div>
+                  <label className="check"><input type="checkbox" name={n("headOfHousehold")} defaultChecked={b("headOfHousehold")} /> Box A: head of household</label>
+                  <label className="check"><input type="checkbox" name={n("student")} defaultChecked={b("fullTimeStudentUnder8k")} /> Box D: full-time student, seasonal or part-time job, $8,000 or less this year (no withholding)</label>
                 </>
               )}
               {st === "OR" && (
@@ -134,13 +150,18 @@ export function EmployeeForm({ companyId, schedules, e, action, submit, companyS
                       </select>
                     </Field>
                     <Field label="Line 1 allowances"><input name={n("allowances")} type="number" min={0} defaultValue={v("allowances")} /></Field>
-                    <Field label="Additional NYS ($/check)"><input name={n("additionalState")} inputMode="decimal" defaultValue={m("additionalState")} /></Field>
+                    <Field label="Line 2 NYC allowances"><input name={n("nycAllowances")} type="number" min={0} defaultValue={v("nycAllowances")} /></Field>
+                  </div>
+                  <div className="row">
+                    <Field label="Line 3 additional NYS ($/check)"><input name={n("additionalState")} inputMode="decimal" defaultValue={m("additionalState")} /></Field>
+                    <Field label="Line 4 additional NYC ($/check)"><input name={n("additionalNyc")} inputMode="decimal" defaultValue={m("additionalNyc")} /></Field>
+                    <Field label="Line 5 additional Yonkers ($/check)"><input name={n("additionalYonkers")} inputMode="decimal" defaultValue={m("additionalYonkers")} /></Field>
                   </div>
                   <label className="check"><input type="checkbox" name={n("nycResident")} defaultChecked={b("nycResident")} /> New York City resident</label>
                   <label className="check"><input type="checkbox" name={n("yonkersResident")} defaultChecked={b("yonkersResident")} /> Yonkers resident</label>
                 </>
               )}
-              <label className="check"><input type="checkbox" name={n("exempt")} defaultChecked={b("exempt")} /> Exempt from {st} withholding</label>
+              <label className="check"><input type="checkbox" name={n("exempt")} defaultChecked={b("exempt")} /> Exempt from {st} withholding{st === "NY" ? " (Form IT-2104-E on file)" : st === "OR" ? " (line 4 exemption code; ends Feb 15 next year)" : ""}</label>
             </details>
           );
         })}
@@ -163,8 +184,13 @@ export function EmployeeForm({ companyId, schedules, e, action, submit, companyS
 
       <fieldset>
         <legend>Form I-9</legend>
-        <label className="check"><input type="checkbox" name="i9Done" defaultChecked={!!e?.i9CompletedAt} /> Sections 1 and 2 are complete (Section 2 is due by the 3rd business day after the first day of work)</label>
-        <p className="small muted">The employee becomes Active once the I-9 is complete.</p>
+        <p className="small muted">Edition 01/20/25. Keep the signed I-9 on paper for now; White Oak tracks the deadlines and how long to keep it.</p>
+        <label className="check"><input type="checkbox" name="i9Section1" defaultChecked={!!i9?.section1CompletedAt || (!i9 && !!e?.i9CompletedAt)} /> Section 1 signed by the employee (due by the first day of work)</label>
+        <label className="check"><input type="checkbox" name="i9Section2" defaultChecked={!!i9?.section2CompletedAt || (!i9 && !!e?.i9CompletedAt)} /> Section 2: you examined their original documents in person (one from List A, or one from List B and one from List C){section2Due ? `, due ${section2Due}` : ", due by the 3rd business day after the first day of work"}</label>
+        <div className="row">
+          <Field label="Work authorization expires" hint="Only if they presented an expiring document such as an EAD; Supplement B is due by then"><input type="date" name="i9ReverifyBy" defaultValue={dateStr(i9?.reverifyBy ?? undefined)} /></Field>
+        </div>
+        <p className="small muted">The employee becomes Active once both sections are done.</p>
       </fieldset>
       <button type="submit">{submit}</button>
       {/* Open the matching state certificate when the work state changes. */}

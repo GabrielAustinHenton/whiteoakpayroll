@@ -12,6 +12,9 @@ import { canOfferAdvance } from "@/lib/payroll/advances";
 import { approveAndPay, audit, voidCheck, createPayRun, generateFilings, recalculate, refreshInvoice } from "@/lib/app/payroll-service";
 import { DEFAULT_HOURS, type Frequency } from "@/lib/app/periods";
 import { cents, str } from "@/components/ui";
+import { protectSsn } from "@/lib/security/field-crypto";
+import { i9Dates, sameForm, stateRecord, w4DependentsCents, w4Record, type W4Entry } from "@/lib/app/onboarding-records";
+import { rehireNeedsNewI9 } from "@/lib/onboarding";
 
 const go = (path: string, msg: { error?: string; ok?: string } = {}): never => {
   const q = msg.error ? `?error=${encodeURIComponent(msg.error)}` : msg.ok ? `?ok=${encodeURIComponent(msg.ok)}` : "";
@@ -99,16 +102,31 @@ function stateW4From(form: FormData, state: string): Prisma.InputJsonValue {
   const on = (name: string) => form.get(`s_${k}_${name}`) === "on";
   const money = (name: string) => cents(form.get(`s_${k}_${name}`));
   switch (state) {
-    case "CT": return on("exempt") ? { code: "E" } : g("code") ? { code: g("code"), additional: money("additional") } : {};
-    case "MA": return { exemptions: Number(g("exemptions") || 0), headOfHousehold: on("headOfHousehold"), additional: money("additional"), exempt: on("exempt") };
+    case "CT": return on("exempt") ? { code: "E" } : g("code") ? { code: g("code"), additional: money("additional"), reduction: money("reduction") } : {};
+    case "MA": return { exemptions: Number(g("exemptions") || 0), headOfHousehold: on("headOfHousehold"), blind: Math.min(2, Number(g("blind") || 0)), fullTimeStudentUnder8k: on("student"), additional: money("additional"), exempt: on("exempt") };
     case "OR": return g("filingStatus") === "none" ? {} : { filingStatus: g("filingStatus") || "single", allowances: Number(g("allowances") || 0), additional: money("additional"), exempt: on("exempt") };
-    case "NY": return { status: g("status") === "married" ? "married" : "single", allowances: Number(g("allowances") || 0), additionalState: money("additionalState"), nycResident: on("nycResident"), yonkersResident: on("yonkersResident"), exempt: on("exempt") };
+    case "NY": return { status: g("status") === "married" ? "married" : "single", allowances: Number(g("allowances") || 0), nycAllowances: Number(g("nycAllowances") || 0), additionalState: money("additionalState"), additionalNyc: money("additionalNyc"), additionalYonkers: money("additionalYonkers"), nycResident: on("nycResident"), yonkersResident: on("yonkersResident"), exempt: on("exempt") };
     default: return {};
   }
 }
 
+function w4Entry(form: FormData): W4Entry {
+  return {
+    filingStatus: str(form.get("w4FilingStatus")) || "single",
+    multipleJobs: form.get("w4MultipleJobs") === "on",
+    children: Number(str(form.get("w4Children")) || 0),
+    otherDependents: Number(str(form.get("w4OtherDependents")) || 0),
+    otherCreditsCents: cents(form.get("w4OtherCredits")),
+    otherIncomeCents: cents(form.get("w4OtherIncome")),
+    deductionsCents: cents(form.get("w4Deductions")),
+    extraCents: cents(form.get("w4Extra")),
+    exempt: form.get("w4Exempt") === "on",
+  };
+}
+
 function employeeFields(form: FormData) {
   const workState = str(form.get("workState"));
+  const w4 = w4Entry(form);
   const payBasis = str(form.get("payBasis")) === "SALARIED" ? "SALARIED" : "HOURLY";
   return {
     firstName: str(form.get("firstName")),
@@ -126,13 +144,12 @@ function employeeFields(form: FormData) {
     nyManualWorker: form.get("nyManualWorker") === "on",
     w4FilingStatus: str(form.get("w4FilingStatus")) || "single",
     w4MultipleJobs: form.get("w4MultipleJobs") === "on",
-    w4DependentsCents: cents(form.get("w4Dependents")),
+    w4DependentsCents: w4DependentsCents(w4),
     w4OtherIncomeCents: cents(form.get("w4OtherIncome")),
     w4DeductionsCents: cents(form.get("w4Deductions")),
     w4ExtraCents: cents(form.get("w4Extra")),
     w4Exempt: form.get("w4Exempt") === "on",
     stateW4: stateW4From(form, workState),
-    i9CompletedAt: form.get("i9Done") === "on" ? new Date() : null,
     bankLast4: str(form.get("bankAccount")).replace(/\D/g, "").slice(-4) || null,
     paymentMethod: str(form.get("paymentMethod")) === "CHECK" ? "CHECK" : "DIRECT_DEPOSIT",
     retirementPretaxRate: Math.min(1, Math.max(0, Number(str(form.get("retirementPct")) || 0) / 100)),
@@ -159,8 +176,41 @@ async function validateEmployee(companyId: string, f: ReturnType<typeof employee
   return schedule!;
 }
 
-/** Status follows onboarding: active once the W-4/state form were reviewed and the I-9 is done. */
-const statusFor = (f: { i9CompletedAt: Date | null }) => (f.i9CompletedAt ? "ACTIVE" : "ONBOARDING");
+/** Status follows onboarding: active once both I-9 sections are done. */
+const statusFor = (i9CompletedAt: Date | null) => (i9CompletedAt ? "ACTIVE" : "ONBOARDING");
+
+/**
+ * Save a new W-4 / state certificate version when it changed, and keep the I-9 dates current.
+ * Forms entered here are paper forms the employee signed; the employer keeps the signed paper.
+ */
+async function saveOnboarding(employeeId: string, userId: string, form: FormData, f: ReturnType<typeof employeeFields>, terminatedOn: Date | null = null) {
+  const now = new Date();
+  const w4 = w4Record(w4Entry(form));
+  const lastW4 = await db.w4Certificate.findFirst({ where: { employeeId, supersededAt: null }, orderBy: { createdAt: "desc" } });
+  if (!lastW4 || !sameForm(lastW4.data, w4.data)) {
+    if (lastW4) await db.w4Certificate.update({ where: { id: lastW4.id }, data: { supersededAt: now } });
+    await db.w4Certificate.create({ data: { employeeId, ...w4, data: w4.data as unknown as Prisma.InputJsonValue, source: "client_hr", enteredById: userId } });
+  }
+  const st = stateRecord(f.workState, f.stateW4);
+  const lastSt = await db.stateWithholdingCertificate.findFirst({ where: { employeeId, state: st.state, supersededAt: null }, orderBy: { createdAt: "desc" } });
+  if (!lastSt || !sameForm(lastSt.data, st.data)) {
+    if (lastSt) await db.stateWithholdingCertificate.update({ where: { id: lastSt.id }, data: { supersededAt: now } });
+    await db.stateWithholdingCertificate.create({ data: { employeeId, ...st, data: f.stateW4, source: "client_hr", enteredById: userId } });
+  }
+  const existing = await db.i9Record.findUnique({ where: { employeeId } });
+  const s1 = form.get("i9Section1") === "on";
+  const s2 = form.get("i9Section2") === "on";
+  const i9 = {
+    // Keep a later first day set by a rehire; otherwise the hire date is the first day of work.
+    ...i9Dates(existing && existing.firstDayOfEmployment > f.hireDate ? existing.firstDayOfEmployment : f.hireDate, terminatedOn),
+    section1CompletedAt: s1 ? (existing?.section1CompletedAt ?? now) : null,
+    section2CompletedAt: s2 ? (existing?.section2CompletedAt ?? now) : null,
+    section2ById: s2 ? (existing?.section2ById ?? userId) : null,
+    reverifyBy: str(form.get("i9ReverifyBy")) ? day(str(form.get("i9ReverifyBy"))) : null,
+  };
+  await db.i9Record.upsert({ where: { employeeId }, create: { employeeId, ...i9 }, update: i9 });
+  return s1 && s2 ? (i9.section2CompletedAt ?? now) : null;
+}
 
 export async function createEmployee(form: FormData) {
   const companyId = id(form);
@@ -172,8 +222,10 @@ export async function createEmployee(form: FormData) {
   const scheduleId = str(form.get("payScheduleId"));
   const schedule = await validateEmployee(companyId, f, scheduleId, back);
   const e = await db.employee.create({
-    data: { ...f, companyId, payScheduleId: scheduleId, ssn: ssn.value!, status: statusFor(f), defaultHours: Number(str(form.get("defaultHours"))) || DEFAULT_HOURS[schedule.frequency as Frequency] },
+    data: { ...f, companyId, payScheduleId: scheduleId, ...protectSsn(ssn.value!), defaultHours: Number(str(form.get("defaultHours"))) || DEFAULT_HOURS[schedule.frequency as Frequency] },
   });
+  const i9Done = await saveOnboarding(e.id, user.id, form, f);
+  await db.employee.update({ where: { id: e.id }, data: { i9CompletedAt: i9Done, status: statusFor(i9Done) } });
   await audit(user.id, companyId, "employee.created", { employeeId: e.id });
   go(`/app/${companyId}/people/${e.id}`, { ok: `${f.firstName} added.` });
 }
@@ -188,17 +240,18 @@ export async function updateEmployee(form: FormData) {
   const scheduleId = str(form.get("payScheduleId"));
   await validateEmployee(companyId, f, scheduleId, back);
   const ssnRaw = str(form.get("ssn"));
-  const ssn = ssnRaw ? normalizeSsn(ssnRaw) : { value: existing.ssn };
-  if ("error" in ssn && ssn.error) go(back, { error: ssn.error });
+  const ssn = ssnRaw ? normalizeSsn(ssnRaw) : null;
+  if (ssn?.error) go(back, { error: ssn.error });
+  const i9Done = await saveOnboarding(employeeId, user.id, form, f, existing.status === "TERMINATED" ? existing.terminationDate : null);
   await db.employee.update({
     where: { id: employeeId },
     data: {
       ...f,
-      ssn: ssn.value!,
+      ...(ssn ? protectSsn(ssn.value!) : {}),
       payScheduleId: scheduleId,
       defaultHours: Number(str(form.get("defaultHours"))) || existing.defaultHours,
-      i9CompletedAt: f.i9CompletedAt ? (existing.i9CompletedAt ?? f.i9CompletedAt) : null,
-      status: existing.status === "TERMINATED" ? "TERMINATED" : statusFor(f),
+      i9CompletedAt: i9Done ? (existing.i9CompletedAt ?? i9Done) : null,
+      status: existing.status === "TERMINATED" ? "TERMINATED" : statusFor(i9Done),
     },
   });
   await audit(user.id, companyId, "employee.updated", { employeeId });
@@ -214,6 +267,8 @@ export async function terminateEmployee(form: FormData) {
     where: { id: employeeId, companyId },
     data: { status: "TERMINATED", terminationDate: day(date), terminationReason: str(form.get("reason")) || null },
   });
+  const i9 = await db.i9Record.findUnique({ where: { employeeId } });
+  if (i9) await db.i9Record.update({ where: { employeeId }, data: { retainUntil: i9Dates(i9.firstDayOfEmployment, day(date)).retainUntil } });
   await audit(user.id, companyId, "employee.terminated", { employeeId, date });
   go(`/app/${companyId}/people/${employeeId}`, {
     ok: "Offboarded. Run their final pay on or before the state deadline (MA: same day if fired; CT: next business day if fired; OR: end of next business day; NY: next regular payday).",
@@ -224,8 +279,17 @@ export async function rehireEmployee(form: FormData) {
   const companyId = id(form);
   await requireArea(companyId, "people");
   const employeeId = str(form.get("employeeId"));
+  const i9 = await db.i9Record.findUnique({ where: { employeeId } });
+  const today = new Date();
+  const fresh = !i9 || rehireNeedsNewI9(i9.firstDayOfEmployment.toISOString().slice(0, 10), today.toISOString().slice(0, 10));
   await db.employee.update({ where: { id: employeeId, companyId }, data: { status: "ONBOARDING", terminationDate: null, terminationReason: null, i9CompletedAt: null } });
-  go(`/app/${companyId}/people/${employeeId}`, { ok: "Rehired. Complete a new I-9 if they left more than 3 years ago." });
+  // Within 3 years the original I-9 is kept and updated with Supplement B; otherwise a new I-9 starts.
+  if (i9) await db.i9Record.update({ where: { employeeId }, data: fresh ? { ...i9Dates(today), section1CompletedAt: null, section2CompletedAt: null, section2ById: null } : { retainUntil: null, section2CompletedAt: null } });
+  go(`/app/${companyId}/people/${employeeId}`, {
+    ok: fresh
+      ? "Rehired. Their I-9 is more than 3 years old, so complete a new Form I-9."
+      : "Rehired. Their I-9 is less than 3 years old: complete Supplement B (rehire) on the original I-9 and mark Section 2 done.",
+  });
 }
 
 /** Give an employee a portal login. The temporary password is shown once to the person inviting. */
