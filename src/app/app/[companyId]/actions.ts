@@ -234,7 +234,8 @@ export async function inviteEmployee(form: FormData) {
   const { user } = await requireArea(companyId, "people");
   const employeeId = str(form.get("employeeId"));
   const e = await db.employee.findFirstOrThrow({ where: { id: employeeId, companyId } });
-  const back = `/app/${companyId}/people/${employeeId}`;
+  const requested = str(form.get("back"));
+  const back = requested.startsWith(`/app/${companyId}/`) ? requested : `/app/${companyId}/people/${employeeId}`;
   if (e.userId) go(back, { error: "They already have a login." });
   if (!e.email) go(back, { error: "Add their email first." });
   const pw = temporaryPassword();
@@ -243,7 +244,7 @@ export async function inviteEmployee(form: FormData) {
   u = await db.user.create({ data: { email: e.email, name: `${e.firstName} ${e.lastName}`, passwordHash: hashPassword(pw), memberships: { create: { companyId, role: "EMPLOYEE" } } } });
   await db.employee.update({ where: { id: employeeId }, data: { userId: u.id } });
   await audit(user.id, companyId, "employee.invited", { employeeId });
-  go(back, { ok: `Portal login created for ${e.email}. Temporary password: ${pw} (shown once; they can change it under Account).` });
+  go(back, { ok: `Portal login created for ${e.firstName}: they sign in at whiteoakpayroll.com/login with ${e.email} and temporary password ${pw} (shown once; they can change it under Account).` });
 }
 
 export async function createContractor(form: FormData) {
@@ -415,7 +416,7 @@ export async function decideAdvance(form: FormData) {
     go(`/app/${companyId}/advances`, { error: `Advances are not available for ${a.employee.workState} employees yet (Connecticut only until counsel signs off).` });
   await db.advance.update({ where: { id: advanceId }, data: { status: approve ? "ACTIVE" : "DECLINED", decidedAt: new Date() } });
   await audit(user.id, companyId, approve ? "advance.approved" : "advance.declined", { advanceId });
-  go(`/app/${companyId}/advances`, { ok: approve ? "Approved. Paid with the next pay run (simulated) and repaid by deduction each pay run, at 0% interest." : "Declined." });
+  go(`/app/${companyId}/advances`, { ok: approve ? "Approved. The advance is sent to the employee now (simulated until TD Bank is connected) and repaid by a deduction on each pay run, at 0% interest." : "Declined." });
 }
 
 /* ---------- Billing ---------- */
