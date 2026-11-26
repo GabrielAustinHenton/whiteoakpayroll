@@ -13,3 +13,18 @@ export function adminAllowed(email: string, env: Record<string, string | undefin
   const list = adminEmails(env);
   return list === null || list.includes(email.trim().toLowerCase());
 }
+
+/**
+ * White Oak payroll staff (payroll operators, e.g. the person who enters every client's data and
+ * runs payroll). Set STAFF_EMAILS to a comma-separated list; staff can work in every client
+ * company but are not admins. Unset means no staff. Removing an email revokes access at once.
+ */
+export function staffEmails(env: Record<string, string | undefined> = process.env): string[] {
+  const raw = env.STAFF_EMAILS?.trim();
+  if (!raw) return [];
+  return raw.split(/[,;\s]+/).map((e) => e.trim().toLowerCase()).filter(Boolean);
+}
+
+export function isStaffEmail(email: string, env: Record<string, string | undefined> = process.env): boolean {
+  return staffEmails(env).includes(email.trim().toLowerCase());
+}

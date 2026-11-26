@@ -13,7 +13,7 @@ export default async function Overview({ params, searchParams }: { params: Promi
       stateAccounts: true,
       paySchedules: true,
       _count: { select: { employees: true, contractors: true } },
-      payRuns: { orderBy: { payday: "desc" }, take: 5 },
+      payRuns: { where: canUse(role, "payroll") ? {} : { status: { in: ["APPROVED", "PAID"] } }, orderBy: { payday: "desc" }, take: 5 },
     },
   });
   const active = await db.employee.count({ where: { companyId, status: "ACTIVE" } });
@@ -21,7 +21,7 @@ export default async function Overview({ params, searchParams }: { params: Promi
   const base = `/app/${companyId}`;
   const owner = canUse(role, "settings");
   const month = new Date().toISOString().slice(0, 7);
-  const bill = canUse(role, "billing") ? await refreshInvoice(companyId, month) : null;
+  const bill = canUse(role, "reports") ? await refreshInvoice(companyId, month) : null;
 
   const steps = [
     { done: !!c.bankLast4, label: "Add the bank account payroll is paid from", href: `${base}/settings#bank`, owner: true },
@@ -47,20 +47,26 @@ export default async function Overview({ params, searchParams }: { params: Promi
           </a>
         )}
       </div>
-      <h2>Setup</h2>
-      <ol className="steps">
+      {!owner && (
+        <div className="card">
+          <p><b>White Oak runs your payroll.</b> Send hours and changes to your White Oak payroll specialist as usual.</p>
+          <p className="small">Here you can <a href={`${base}/people/new`}>add a new employee</a> with their W-4 and I-9 details, and see your <a href={`${base}/payroll`}>pay runs, paystubs and checks</a>, <a href={`${base}/filings`}>tax filings</a> and <a href={`${base}/billing`}>White Oak bill</a>.</p>
+        </div>
+      )}
+      {owner && <h2>Setup</h2>}
+      {owner && <ol className="steps">
         {steps.map((s) => (
           <li key={s.label}>
             <span className={s.done ? "done" : "todo"}>{s.done ? "✓" : "○"}</span>
             <a href={s.href}>{s.label}</a>
           </li>
         ))}
-      </ol>
-      {owner && (
+      </ol>}
+      {canUse(role, "reports") && (
         <>
           <h2>Recent pay runs</h2>
           {c.payRuns.length === 0 ? (
-            <p className="muted">No pay runs yet. <a href={`${base}/payroll`}>Start one</a> once setup is done.</p>
+            <p className="muted">No pay runs yet.{owner && <> <a href={`${base}/payroll`}>Start one</a> once setup is done.</>}</p>
           ) : (
             <div className="table-wrap">
               <table>

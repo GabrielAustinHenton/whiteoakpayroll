@@ -1,13 +1,14 @@
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
-import { requireArea } from "@/lib/auth/session";
+import { canUse, requireArea } from "@/lib/auth/session";
 import { Notice, messages, prettyDate, usd } from "@/components/ui";
 import type { LineDetail } from "@/lib/app/engine";
 import { feeForRun } from "@/lib/app/payroll-service";
 import { PRICING } from "@/lib/pricing";
 import type { TaxLine } from "@/lib/tax-engine";
 import { DEDUCTION_LABELS } from "@/lib/pay-run/review";
-import { approveRun, deleteDraftRun, removeContractorPayment, saveRunInputs, voidOrReissueCheck } from "../../actions";
+import { GridKeys } from "./grid-keys";
+import { approveRun, deleteDraftRun, removeContractorPayment, saveRunInputs, voidOrReissueCheck, importHours } from "../../actions";
 
 function group(details: LineDetail[], payer: "employee" | "employer") {
   const m = new Map<string, { label: string; jurisdiction: string; amount: number }>();
@@ -23,13 +24,16 @@ function group(details: LineDetail[], payer: "employee" | "employer") {
 
 export default async function PayRunPage({ params, searchParams }: { params: Promise<{ companyId: string; runId: string }>; searchParams: Promise<Record<string, string>> }) {
   const { companyId, runId } = await params;
-  await requireArea(companyId, "payroll");
-  const { error, ok } = await messages(searchParams);
+  const { role } = await requireArea(companyId, "reports");
+  const staff = canUse(role, "payroll");
+  const { error, ok, sp } = await messages(searchParams);
+  const imported = typeof sp.imported === "string" ? sp.imported : "";
   const run = await db.payRun.findFirst({
     where: { id: runId, companyId },
     include: { paySchedule: true, lines: { include: { employee: true }, orderBy: { employee: { lastName: "asc" } } }, contractorPayments: { include: { contractor: true } } },
   });
-  if (!run) notFound();
+  // Clients see a pay run once White Oak has approved it.
+  if (!run || (!staff && run.status === "DRAFT")) notFound();
   const contractors = await db.contractor.findMany({ where: { companyId, status: "ACTIVE" } });
   const fee = await feeForRun(run.id);
   const monthName = new Date(`${fee.month}-01T00:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", month: "long", year: "numeric" });
@@ -62,23 +66,45 @@ export default async function PayRunPage({ params, searchParams }: { params: Pro
       <p className="muted">{run.paySchedule.name} · pays {iso(run.periodStart)} to {iso(run.periodEnd)}{run.fundingRef ? ` · funding ref ${run.fundingRef} (simulated)` : ""}</p>
       <Notice error={error} ok={ok} />
 
+      {draft && (
+        <details className="card" open={!!imported}>
+          <summary><b>Import hours from BuddyPunch</b> (or another time clock)</summary>
+          <p className="small muted">
+            In BuddyPunch run the <b>Payroll Export</b> (or Hours Summary) report for {iso(run.periodStart)} to {iso(run.periodEnd)} and download it as CSV.
+            Upload it here: hours are matched to employees by name and filled into the grid below for you to check before approving.
+          </p>
+          <form action={importHours} className="actions">
+            {hidden}
+            <input type="file" name="file" accept=".csv,text/csv" required style={{ width: "auto" }} />
+            <button type="submit" className="secondary">Import hours</button>
+          </form>
+          {imported && <pre className="small" style={{ whiteSpace: "pre-wrap" }}>{imported}</pre>}
+        </details>
+      )}
+
       <form action={saveRunInputs}>
         {hidden}
         <h2>{draft ? "1. Hours and extra pay" : "Paychecks"}</h2>
+        {draft && <p className="small muted">Type hours, press Tab to move to the next box, and press Enter to recalculate. Overtime is paid at 1.5 times the hourly rate.</p>}
         <div className="table-wrap">
           <table>
-            <thead><tr>{draft && <th>Pay?</th>}<th>Employee</th><th className="num">Hours</th><th className="num">Bonus</th><th className="num">Gross</th><th className="num">Taxes</th><th className="num">Deductions</th><th className="num">Net pay</th>{!draft && <th>Paystub</th>}</tr></thead>
+            <thead><tr>{draft && <th>Pay?</th>}<th>Employee</th><th className="num">Hours</th><th className="num">Overtime</th><th className="num">Bonus</th><th className="num">Gross</th><th className="num">Taxes</th><th className="num">Deductions</th><th className="num">Net pay</th>{!draft && <th>Paystub</th>}</tr></thead>
             <tbody>
               {run.lines.map((l) => (
                 <tr key={l.id}>
-                  {draft && <td><input type="checkbox" name={`include_${l.id}`} defaultChecked style={{ width: "auto" }} /></td>}
+                  {draft && <td><input type="checkbox" name={`include_${l.id}`} defaultChecked tabIndex={-1} aria-label={`Pay ${l.employee.firstName} ${l.employee.lastName}`} style={{ width: "auto" }} /></td>}
                   <td>{l.employee.firstName} {l.employee.lastName} <span className="small muted">{l.employee.workState} · {l.employee.paymentMethod === "CHECK" ? "check" : "direct deposit"}</span></td>
                   <td className="num">
                     {l.employee.payBasis === "HOURLY"
-                      ? draft ? <input name={`hours_${l.id}`} defaultValue={l.hours ?? 0} inputMode="decimal" /> : l.hours
+                      ? draft ? <input name={`hours_${l.id}`} className="grid-hours" defaultValue={l.hours ?? 0} inputMode="decimal" aria-label={`Hours for ${l.employee.firstName} ${l.employee.lastName}`} /> : l.hours
                       : <span className="muted">salary</span>}
                   </td>
-                  <td className="num">{draft ? <input name={`bonus_${l.id}`} defaultValue={l.bonusCents ? (l.bonusCents / 100).toFixed(2) : ""} inputMode="decimal" /> : usd(l.bonusCents)}</td>
+                  <td className="num">
+                    {l.employee.payBasis === "HOURLY"
+                      ? draft ? <input name={`ot_${l.id}`} defaultValue={l.overtimeHours || ""} inputMode="decimal" aria-label={`Overtime hours for ${l.employee.firstName} ${l.employee.lastName}`} /> : l.overtimeHours || ""
+                      : ""}
+                  </td>
+                  <td className="num">{draft ? <input name={`bonus_${l.id}`} defaultValue={l.bonusCents ? (l.bonusCents / 100).toFixed(2) : ""} inputMode="decimal" aria-label={`Bonus for ${l.employee.firstName} ${l.employee.lastName}`} /> : usd(l.bonusCents)}</td>
                   <td className="num">{usd(l.grossCents)}</td>
                   <td className="num">{usd(l.employeeTaxesCents)}</td>
                   <td className="num">{usd(l.deductionsCents)}</td>
@@ -113,6 +139,7 @@ export default async function PayRunPage({ params, searchParams }: { params: Pro
         {draft && contractors.length === 0 && run.contractorPayments.length === 0 && <p className="muted small">No contractors.</p>}
         {draft && <p><button type="submit" className="secondary">Recalculate</button></p>}
       </form>
+      {draft && <GridKeys />}
       {draft && run.contractorPayments.map((p) => (
         <form key={p.id} action={removeContractorPayment} className="inline">
           {hidden}
@@ -126,7 +153,8 @@ export default async function PayRunPage({ params, searchParams }: { params: Pro
           <h2>Payments</h2>
           <p className="muted">
             Direct deposits go out on payday (simulated until TD Bank is connected).{" "}
-            {checks.some((c) => c.status === "ISSUED") && <a href={`/api/payruns/${run.id}/checks`}><b>Print checks (PDF)</b></a>}
+            {checks.some((c) => c.status === "ISSUED") && <><a href={`/api/payruns/${run.id}/checks`}><b>Print all checks (PDF)</b></a> · </>}
+            {run.status === "PAID" && <a href={`/api/payruns/${run.id}/paystubs`}><b>Print all paystubs (PDF)</b></a>}
           </p>
           {checks.length > 0 && (
             <table>
@@ -139,7 +167,8 @@ export default async function PayRunPage({ params, searchParams }: { params: Pro
                     <td className="num">{usd(c.amountCents)}</td>
                     <td>{c.status === "VOID" ? `void${c.voidReason ? ` (${c.voidReason})` : ""}` : "issued"}</td>
                     <td>
-                      {c.status === "ISSUED" && (
+                      {c.status === "ISSUED" && !staff && <a href={`/api/payruns/${run.id}/checks?check=${c.id}`}>Print</a>}
+                      {c.status === "ISSUED" && staff && (
                         <form action={voidOrReissueCheck} className="actions">
                           {hidden}
                           <input type="hidden" name="checkId" value={c.id} />

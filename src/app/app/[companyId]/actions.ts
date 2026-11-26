@@ -4,14 +4,14 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { canUse, requireWrite } from "@/lib/auth/session";
-import type { Role } from "@prisma/client";
-import { ensurePortalInvite, inviteTeammateLogin, resendInvite } from "@/lib/app/invites";
+import { canUse, requireWrite, type AppRole } from "@/lib/auth/session";
+import { inviteTeammateLogin } from "@/lib/app/invites";
 import { normalizeEin, normalizeSsn } from "@/lib/app/ids";
 import { checkPayFrequency, type LaunchState } from "@/lib/payroll/schedules";
 import { canOfferAdvance } from "@/lib/payroll/advances";
 import { approveAndPay, audit, voidCheck, createPayRun, generateFilings, recalculate, refreshInvoice } from "@/lib/app/payroll-service";
 import { DEFAULT_HOURS, type Frequency } from "@/lib/app/periods";
+import { nameKey, readTimeExport } from "@/lib/app/time-import";
 import { cents, str, usd } from "@/components/ui";
 
 const go = (path: string, msg: { error?: string; ok?: string } = {}): never => {
@@ -29,18 +29,12 @@ const companyName = async (companyId: string) => {
 };
 
 /** Headcount changed: update this month's bill and, for people who can see billing, say what it is now. */
-async function feeNote(companyId: string, role: Role) {
+async function feeNote(companyId: string, role: AppRole) {
   const bill = await refreshInvoice(companyId, thisMonth());
   if (!canUse(role, "billing")) return "";
   return ` White Oak fee this month: ${usd(bill.total)} (${bill.peopleCount} ${bill.peopleCount === 1 ? "person" : "people"}).`;
 }
 
-/** Portal invite result, worded for the notice after saving an employee. */
-async function portalNote(e: Parameters<typeof ensurePortalInvite>[0]) {
-  const r = await ensurePortalInvite(e, await companyName(e.companyId));
-  if (!r) return "";
-  return " " + ("error" in r ? r.error : r.message);
-}
 
 /* ---------- Company settings ---------- */
 
@@ -163,12 +157,12 @@ function employeeFields(form: FormData) {
 
 async function validateEmployee(companyId: string, f: ReturnType<typeof employeeFields>, scheduleId: string, back: string) {
   if (!f.firstName || !f.lastName) go(back, { error: "First and last name are required." });
-  if (!EMAIL.test(f.email)) go(back, { error: "Enter the employee's email. Their portal invite goes there." });
+  if (f.email && !EMAIL.test(f.email)) go(back, { error: "That email doesn't look right." });
   if (!LAUNCH.includes(f.workState)) go(back, { error: "Work state must be CT, MA, OR or NY." });
   if (Number.isNaN(f.birthDate.getTime()) || Number.isNaN(f.hireDate.getTime())) go(back, { error: "Enter the birth date and hire date." });
   if (f.payRateCents <= 0) go(back, { error: "Enter the pay rate." });
   const schedule = await db.paySchedule.findFirst({ where: { id: scheduleId, companyId } });
-  if (!schedule) go(back, { error: "Create a pay schedule first (Company settings)." });
+  if (!schedule) go(back, { error: "There is no pay schedule yet. White Oak sets it up in Company settings." });
   const acct = await db.stateAccount.findUnique({ where: { companyId_state: { companyId, state: f.workState } } });
   const freq = schedule!.frequency.toLowerCase() as "weekly";
   const check = checkPayFrequency(freq, {
@@ -186,7 +180,7 @@ const statusFor = (f: { i9CompletedAt: Date | null }) => (f.i9CompletedAt ? "ACT
 
 export async function createEmployee(form: FormData) {
   const companyId = id(form);
-  const { user, role } = await requireWrite(companyId, "people");
+  const { user, role } = await requireWrite(companyId, "add_people");
   const back = `/app/${companyId}/people/new`;
   const ssn = normalizeSsn(str(form.get("ssn")));
   if (ssn.error) go(back, { error: ssn.error });
@@ -197,8 +191,10 @@ export async function createEmployee(form: FormData) {
     data: { ...f, companyId, payScheduleId: scheduleId, ssn: ssn.value!, status: statusFor(f), defaultHours: Number(str(form.get("defaultHours"))) || DEFAULT_HOURS[schedule.frequency as Frequency] },
   });
   await audit(user.id, companyId, "employee.created", { employeeId: e.id });
-  const invite = await portalNote(e);
-  go(`/app/${companyId}/people/${e.id}`, { ok: `${f.firstName} added.${invite}${await feeNote(companyId, role)}` });
+  const fee = await feeNote(companyId, role);
+  // Clients add people; White Oak staff review and maintain the record afterwards.
+  if (canUse(role, "people")) go(`/app/${companyId}/people/${e.id}`, { ok: `${f.firstName} added.${fee}` });
+  go(`/app/${companyId}/people`, { ok: `${f.firstName} ${f.lastName} added. White Oak will review their W-4 and I-9 details before the next payroll.${fee}` });
 }
 
 export async function updateEmployee(form: FormData) {
@@ -213,7 +209,7 @@ export async function updateEmployee(form: FormData) {
   const ssnRaw = str(form.get("ssn"));
   const ssn = ssnRaw ? normalizeSsn(ssnRaw) : { value: existing.ssn };
   if ("error" in ssn && ssn.error) go(back, { error: ssn.error });
-  const saved = await db.employee.update({
+  await db.employee.update({
     where: { id: employeeId },
     data: {
       ...f,
@@ -225,7 +221,7 @@ export async function updateEmployee(form: FormData) {
     },
   });
   await audit(user.id, companyId, "employee.updated", { employeeId });
-  go(back, { ok: `Saved.${saved.status === "TERMINATED" ? "" : await portalNote(saved)}` });
+  go(back, { ok: "Saved." });
 }
 
 export async function terminateEmployee(form: FormData) {
@@ -250,19 +246,6 @@ export async function rehireEmployee(form: FormData) {
   const employeeId = str(form.get("employeeId"));
   await db.employee.update({ where: { id: employeeId, companyId }, data: { status: "ONBOARDING", terminationDate: null, terminationReason: null, i9CompletedAt: null } });
   go(`/app/${companyId}/people/${employeeId}`, { ok: `Rehired. Complete a new I-9 if they left more than 3 years ago.${await feeNote(companyId, role)}` });
-}
-
-/** Send a pending portal invite again with a fresh link (for a lost or expired email). */
-export async function resendPortalInvite(form: FormData) {
-  const companyId = id(form);
-  const { user } = await requireWrite(companyId, "people");
-  const employeeId = str(form.get("employeeId"));
-  const e = await db.employee.findFirstOrThrow({ where: { id: employeeId, companyId } });
-  const back = `/app/${companyId}/people/${employeeId}`;
-  if (!e.userId) go(back, { error: "Save the employee with an email first." });
-  const r = await resendInvite(e.userId!, await companyName(companyId), "portal");
-  await audit(user.id, companyId, "employee.invite_resent", { employeeId });
-  go(back, { ok: r.message });
 }
 
 export async function createContractor(form: FormData) {
@@ -333,7 +316,11 @@ export async function saveRunInputs(form: FormData) {
     }
     await db.payRunLine.update({
       where: { id: l.id },
-      data: { hours: hours === null ? l.hours : Number(hours) || 0, bonusCents: cents(form.get(`bonus_${l.id}`)) },
+      data: {
+        hours: hours === null ? l.hours : Math.max(0, Number(hours) || 0),
+        overtimeHours: form.get(`ot_${l.id}`) === null ? l.overtimeHours : Math.max(0, Number(form.get(`ot_${l.id}`)) || 0),
+        bonusCents: cents(form.get(`bonus_${l.id}`)),
+      },
     });
   }
   const contractorId = str(form.get("contractorId"));
@@ -343,6 +330,53 @@ export async function saveRunInputs(form: FormData) {
   }
   await recalculate(payRunId);
   go(`/app/${companyId}/payroll/${payRunId}`, { ok: "Recalculated." });
+}
+
+/**
+ * Fill a draft pay run's hours from a time clock export (BuddyPunch CSV). Hourly employees are
+ * matched by name; anyone not in the file keeps the hours already in the grid. The result is a
+ * summary shown above the grid so the hours can be checked before approving.
+ */
+export async function importHours(form: FormData) {
+  const companyId = id(form);
+  const { user } = await requireWrite(companyId, "payroll");
+  const payRunId = str(form.get("payRunId"));
+  const here = `/app/${companyId}/payroll/${payRunId}`;
+  const run = await db.payRun.findFirstOrThrow({ where: { id: payRunId, companyId }, include: { lines: { include: { employee: true } } } });
+  if (run.status !== "DRAFT") go(here, { error: "This pay run is already approved." });
+  const file = form.get("file");
+  if (!(file instanceof File) || file.size === 0) go(here, { error: "Choose the CSV file to import." });
+  if ((file as File).size > 2_000_000) go(here, { error: "That file is too large for an hours export (2 MB limit)." });
+  const name = (file as File).name.toLowerCase();
+  if (name.endsWith(".xlsx") || name.endsWith(".xls")) go(here, { error: "That is an Excel file. In BuddyPunch choose CSV when you download the report, or in Excel use File > Save As > CSV." });
+  const { people, warnings } = readTimeExport(await (file as File).text());
+  if (people.length === 0) go(here, { error: warnings[0] ?? "No hours found in that file." });
+
+  const byKey = new Map(people.map((p) => [nameKey(p.name), p]));
+  const lines: string[] = [];
+  const used = new Set<string>();
+  let filled = 0;
+  for (const l of run.lines) {
+    const e = l.employee;
+    const p = byKey.get(nameKey(`${e.firstName} ${e.lastName}`));
+    if (!p) {
+      if (e.payBasis === "HOURLY") lines.push(`Not in file, left as is: ${e.firstName} ${e.lastName} (${l.hours ?? 0} h)`);
+      continue;
+    }
+    used.add(nameKey(p.name));
+    if (e.payBasis !== "HOURLY") {
+      lines.push(`Salaried, hours not used: ${e.firstName} ${e.lastName} (${p.regular + p.overtime} h in file)`);
+      continue;
+    }
+    await db.payRunLine.update({ where: { id: l.id }, data: { hours: p.regular, overtimeHours: p.overtime } });
+    filled++;
+    if (p.regular + p.overtime > 100) lines.push(`Check: ${e.firstName} ${e.lastName} has ${p.regular + p.overtime} hours.`);
+  }
+  for (const p of people) if (!used.has(nameKey(p.name))) lines.push(`In file but not on this pay run: ${p.name} (${p.regular} h${p.overtime ? ` + ${p.overtime} OT` : ""}). Add them in People, or check the spelling.`);
+  await recalculate(payRunId);
+  await audit(user.id, companyId, "payrun.hours_imported", { payRunId, file: (file as File).name, filled, people: people.length });
+  const summary = [`Filled hours for ${filled} of ${run.lines.filter((l) => l.employee.payBasis === "HOURLY").length} hourly employees from ${(file as File).name}.`, ...warnings, ...lines].join("\n");
+  redirect(`${here}?imported=${encodeURIComponent(summary.slice(0, 1800))}`);
 }
 
 export async function removeContractorPayment(form: FormData) {
@@ -424,6 +458,31 @@ export async function markFiled(form: FormData) {
 }
 
 /* ---------- Advances ---------- */
+
+/**
+ * White Oak staff record an advance the employee asked for (on paper, by phone or email). The
+ * employee signs the written repayment authorization; staff type the name as signed and the date.
+ */
+export async function recordAdvance(form: FormData) {
+  const companyId = id(form);
+  const { user } = await requireWrite(companyId, "advances");
+  const back = `/app/${companyId}/advances`;
+  const e = await db.employee.findFirst({ where: { id: str(form.get("employeeId")), companyId } });
+  if (!e || e.status !== "ACTIVE") go(back, { error: "Only active employees (I-9 complete) can get an advance." });
+  if (!canOfferAdvance(e!.workState as LaunchState)) go(back, { error: `Advances are not available for ${e!.workState} employees yet (Connecticut only until counsel signs off).` });
+  const amount = cents(form.get("amount"));
+  const installment = cents(form.get("installment"));
+  const signed = str(form.get("signedName"));
+  const signedOn = day(str(form.get("signedOn")));
+  if (amount <= 0 || amount > 100_000) go(back, { error: "Enter an advance between $1 and $1,000." });
+  if (installment <= 0 || installment > amount) go(back, { error: "The repayment per pay run must be more than $0 and no more than the advance." });
+  if (!signed || Number.isNaN(signedOn.getTime())) go(back, { error: "Enter the name as signed on the repayment authorization, and the date signed." });
+  const open = await db.advance.count({ where: { employeeId: e!.id, status: { in: ["REQUESTED", "ACTIVE"] } } });
+  if (open) go(back, { error: `${e!.firstName} already has an advance open.` });
+  await db.advance.create({ data: { employeeId: e!.id, principalCents: amount, installmentCents: installment, authorizationSignedName: signed, authorizationSignedAt: signedOn } });
+  await audit(user.id, companyId, "advance.recorded", { employeeId: e!.id, amount });
+  go(back, { ok: `Advance request recorded for ${e!.firstName}. Approve it below to pay it.` });
+}
 
 export async function decideAdvance(form: FormData) {
   const companyId = id(form);

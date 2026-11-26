@@ -292,6 +292,8 @@ model PayRunLine {
   employeeId   String
   employee     Employee @relation(fields: [employeeId], references: [id])
   hours        Float?
+  /** Overtime hours, paid at 1.5x the hourly rate (hourly employees). */
+  overtimeHours Float   @default(0)
   regularCents Int
   bonusCents   Int      @default(0)
   grossCents   Int      @default(0)

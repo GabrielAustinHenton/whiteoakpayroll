@@ -3,7 +3,7 @@ import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import type { Role } from "@prisma/client";
 import { db } from "../db";
-import { adminAllowed } from "./admins";
+import { adminAllowed, isStaffEmail } from "./admins";
 
 const COOKIE = "wo_session";
 const DAYS = 14;
@@ -37,7 +37,12 @@ export async function currentUser() {
   const s = await db.session.findUnique({ where: { tokenHash: sha256(token) }, include: { user: { include: { memberships: true } } } });
   if (!s || s.expiresAt < new Date()) return null;
   // ADMIN_EMAILS, when set, is the allowlist: removing an email there revokes admin access at once.
-  return { ...s.user, isPlatformAdmin: s.user.isPlatformAdmin && adminAllowed(s.user.email) };
+  // STAFF_EMAILS lists White Oak payroll staff (operators); a login with a password is required.
+  return {
+    ...s.user,
+    isPlatformAdmin: s.user.isPlatformAdmin && adminAllowed(s.user.email),
+    isStaff: Boolean(s.user.passwordHash) && isStaffEmail(s.user.email),
+  };
 }
 
 export type CurrentUser = NonNullable<Awaited<ReturnType<typeof currentUser>>>;
@@ -48,34 +53,62 @@ export async function requireUser(): Promise<CurrentUser> {
   return u;
 }
 
-/** Areas of a company account and which roles can use them. */
-export type Area = "dashboard" | "people" | "payroll" | "filings" | "settings" | "billing" | "team" | "advances";
+/**
+ * Areas of a company account. White Oak runs payroll for its clients as a service bureau: staff
+ * (payroll operators) enter everything; client owners and HR see reports and add employees.
+ *   reports     view pay runs, paystubs, checks, tax filings and the White Oak bill
+ *   add_people  see the people list and add a new employee
+ * The rest are data entry and payroll work, for White Oak staff.
+ */
+export type Area = "dashboard" | "reports" | "add_people" | "people" | "payroll" | "filings" | "settings" | "billing" | "team" | "advances";
 
-const AREAS: Record<Exclude<Role, "PLATFORM_ADMIN">, Area[]> = {
-  CLIENT_OWNER: ["dashboard", "people", "payroll", "filings", "settings", "billing", "team", "advances"],
-  // Client HR: onboard and offboard only. No payroll, bank, tax or billing access.
-  CLIENT_HR: ["dashboard", "people"],
+/** A membership role, or White Oak staff working across every client. */
+export type AppRole = Role | "PAYROLL_OPERATOR";
+
+const ALL: Area[] = ["dashboard", "reports", "add_people", "people", "payroll", "filings", "settings", "billing", "team", "advances"];
+const AREAS: Record<Exclude<AppRole, "PLATFORM_ADMIN">, Area[]> = {
+  PAYROLL_OPERATOR: ALL,
+  CLIENT_OWNER: ["dashboard", "reports", "add_people"],
+  CLIENT_HR: ["dashboard", "reports", "add_people"],
   EMPLOYEE: [],
 };
 
+export const ROLE_LABEL: Record<AppRole, string> = {
+  PLATFORM_ADMIN: "White Oak admin",
+  PAYROLL_OPERATOR: "White Oak payroll staff",
+  CLIENT_OWNER: "Owner",
+  CLIENT_HR: "HR",
+  EMPLOYEE: "Employee",
+};
+
 /**
- * The caller's role in a company. An owner or HR membership wins (an admin who also runs a company
- * uses it as its owner); otherwise White Oak staff get PLATFORM_ADMIN; else the membership role.
+ * The caller's role in a company. An owner or HR membership wins (someone who also runs a company
+ * uses it as its client); then White Oak payroll staff; then admins; else the membership role.
  */
-export function roleIn(user: CurrentUser, companyId: string): Role | null {
+export function roleIn(user: CurrentUser, companyId: string): AppRole | null {
   const m = user.memberships.find((x) => x.companyId === companyId)?.role ?? null;
   if (m === "CLIENT_OWNER" || m === "CLIENT_HR") return m;
+  if (user.isStaff) return "PAYROLL_OPERATOR";
   if (user.isPlatformAdmin) return "PLATFORM_ADMIN";
   return m;
 }
 
-export function canUse(role: Role | null, area: Area): boolean {
+export function canUse(role: AppRole | null, area: Area): boolean {
   if (!role) return false;
   if (role === "PLATFORM_ADMIN") return true;
   return AREAS[role].includes(area);
 }
 
-/** Gate a company page or action. Redirects away when the caller lacks access. */
+/** White Oak staff or admin: works across every client company. */
+export const isWhiteOak = (role: AppRole | null) => role === "PAYROLL_OPERATOR" || role === "PLATFORM_ADMIN";
+
+/** Gate a White Oak payroll staff page (admins can look too). */
+export async function requireStaff(): Promise<CurrentUser> {
+  const user = await requireUser();
+  if (!user.isStaff && !user.isPlatformAdmin) redirect("/app");
+  return user;
+}
+
 export async function requireArea(companyId: string, area: Area) {
   const user = await requireUser();
   const role = roleIn(user, companyId);

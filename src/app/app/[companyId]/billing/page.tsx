@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { requireArea } from "@/lib/auth/session";
+import { canUse, requireArea } from "@/lib/auth/session";
 import { Notice, messages, usd } from "@/components/ui";
 import { PRICING } from "@/lib/pricing";
 import { refreshInvoice } from "@/lib/app/payroll-service";
@@ -7,7 +7,8 @@ import { toggleAddOn } from "../actions";
 
 export default async function Billing({ params, searchParams }: { params: Promise<{ companyId: string }>; searchParams: Promise<Record<string, string>> }) {
   const { companyId } = await params;
-  await requireArea(companyId, "billing");
+  const { role } = await requireArea(companyId, "reports");
+  const staff = canUse(role, "billing");
   const { error, ok } = await messages(searchParams);
   const month = new Date().toISOString().slice(0, 7);
   const bill = await refreshInvoice(companyId, month);
@@ -34,11 +35,11 @@ export default async function Billing({ params, searchParams }: { params: Promis
           <div className="actions">
             <b>{name}</b>
             <span className={`badge ${on(k) ? "active" : ""}`}>{on(k) ? "on" : "off"}</span>
-            <form action={toggleAddOn} className="inline">
+            {staff && <form action={toggleAddOn} className="inline">
               <input type="hidden" name="companyId" value={companyId} />
               <input type="hidden" name="addOn" value={k} />
               <button type="submit" className="secondary">{on(k) ? "Turn off" : "Turn on"}</button>
-            </form>
+            </form>}
           </div>
           <p className="small muted">{desc} Price to be announced.</p>
         </div>

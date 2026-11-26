@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { requireArea } from "@/lib/auth/session";
+import { canUse, requireArea } from "@/lib/auth/session";
 import { Notice, messages, prettyDate } from "@/components/ui";
 import { generate, markFiled } from "../actions";
 
@@ -7,7 +7,8 @@ const ORDER = ["941", "940", "W-3", "W-2", "1096", "1099-NEC", "CT-941", "CT-W3"
 
 export default async function Filings({ params, searchParams }: { params: Promise<{ companyId: string }>; searchParams: Promise<Record<string, string>> }) {
   const { companyId } = await params;
-  await requireArea(companyId, "filings");
+  const { role } = await requireArea(companyId, "reports");
+  const staff = canUse(role, "filings");
   const { error, ok } = await messages(searchParams);
   const filings = await db.filing.findMany({ where: { companyId }, orderBy: [{ period: "desc" }, { form: "asc" }], select: { id: true, form: true, period: true, recipient: true, status: true, generatedAt: true, filedAt: true } });
   const runs = await db.payRun.findMany({ where: { companyId, status: "PAID" }, select: { payday: true } });
@@ -20,7 +21,8 @@ export default async function Filings({ params, searchParams }: { params: Promis
   const byPeriod = new Map<string, typeof filings>();
   for (const f of filings) byPeriod.set(f.period, [...(byPeriod.get(f.period) ?? []), f]);
   for (const list of byPeriod.values()) list.sort((a, b) => ORDER.indexOf(a.form) - ORDER.indexOf(b.form) || (a.recipient ?? "").localeCompare(b.recipient ?? ""));
-  const all = [...new Set([...periods, ...byPeriod.keys()])].sort().reverse();
+  // Clients see periods that have forms; staff also see periods ready to generate.
+  const all = [...new Set([...(staff ? periods : []), ...byPeriod.keys()])].sort().reverse();
 
   return (
     <>
@@ -31,16 +33,16 @@ export default async function Filings({ params, searchParams }: { params: Promis
         this archive. A Form 1096 is always kept, even when 1099s are e-filed, because Connecticut auditors ask for it.
       </p>
       <Notice error={error} ok={ok} />
-      {all.length === 0 && <p className="notice">No paid pay runs yet. Forms appear here after your first approved pay run.</p>}
+      {all.length === 0 && <p className="notice">{staff ? "No paid pay runs yet. Forms appear here after the first approved pay run." : "No forms yet. White Oak prepares them each quarter and at year end."}</p>}
       {all.map((p) => (
         <div className="card" key={p}>
           <div className="actions">
             <b>{p.includes("Q") ? `${p.slice(0, 4)} quarter ${p.slice(-1)}` : `${p} year end`}</b>
-            <form action={generate} className="inline">
+            {staff && <form action={generate} className="inline">
               <input type="hidden" name="companyId" value={companyId} />
               <input type="hidden" name="period" value={p} />
               <button type="submit" className="secondary">{byPeriod.has(p) ? "Regenerate" : "Generate forms"}</button>
-            </form>
+            </form>}
           </div>
           {(byPeriod.get(p) ?? []).length > 0 && (
             <table>
@@ -49,7 +51,7 @@ export default async function Filings({ params, searchParams }: { params: Promis
                   <tr key={f.id}>
                     <td><b>{f.form}</b>{f.recipient ? ` · ${f.recipient}` : ""}</td>
                     <td className="small muted">generated {prettyDate(f.generatedAt)}</td>
-                    <td>{f.status === "filed" ? <span className="badge paid">filed {prettyDate(f.filedAt)}</span> : (
+                    <td>{f.status === "filed" ? <span className="badge paid">filed {prettyDate(f.filedAt)}</span> : !staff ? <span className="small muted">not filed yet</span> : (
                       <form action={markFiled} className="inline">
                         <input type="hidden" name="companyId" value={companyId} />
                         <input type="hidden" name="filingId" value={f.id} />

@@ -1,9 +1,11 @@
 import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth/session";
-import { adminEmails } from "@/lib/auth/admins";
+import { loginStatus } from "@/lib/app/invites";
+import { sendStaffInvite } from "../ops/actions";
+import { adminEmails, staffEmails } from "@/lib/auth/admins";
 import { loadPortal } from "@/lib/app/admin-metrics";
 import { PRICING } from "@/lib/pricing";
-import { messages, prettyDate, usd } from "@/components/ui";
+import { Notice, messages, prettyDate, usd } from "@/components/ui";
 
 export const metadata = { title: "Admin · White Oak Payroll" };
 export const dynamic = "force-dynamic";
@@ -15,7 +17,7 @@ const monthName = (m: string) => new Date(`${m}-01T00:00:00Z`).toLocaleDateStrin
 
 export default async function Admin({ searchParams }: { searchParams: Promise<Record<string, string>> }) {
   const user = await requireAdmin();
-  const { sp } = await messages(searchParams);
+  const { sp, error, ok } = await messages(searchParams);
   const q = typeof sp.q === "string" ? sp.q.trim().toLowerCase() : "";
   const p = await loadPortal();
   const rows = q
@@ -26,6 +28,8 @@ export default async function Admin({ searchParams }: { searchParams: Promise<Re
     db.auditLog.findMany({ where: { action: { startsWith: "admin." } }, orderBy: { createdAt: "desc" }, take: 15, include: { company: { select: { legalName: true } } } }),
   ]);
   const allow = adminEmails();
+  const staffList = staffEmails();
+  const staffUsers = await db.user.findMany({ where: { email: { in: staffList } } });
   const names = new Map(admins.map((a) => [a.id, a.name]));
   const maxTrend = Math.max(1, ...p.trend.map((t) => t.totalCents));
   const overdue = p.deadlines.filter((d) => d.status === "overdue").length;
@@ -33,6 +37,7 @@ export default async function Admin({ searchParams }: { searchParams: Promise<Re
   return (
     <>
       <h1 className="admin-title">White Oak admin</h1>
+      <Notice error={error} ok={ok} />
       <p className="muted small">Signed in as {user.name}. Opening a client shows their account read-only; every admin visit is logged.</p>
 
       <div className="stats">
@@ -159,6 +164,37 @@ export default async function Admin({ searchParams }: { searchParams: Promise<Re
           : "ADMIN_EMAILS is not set, so anyone with the setup code can become an admin. Set it in Vercel to lock this down."}{" "}
         New admins sign up at <a href="/admin/setup">/admin/setup</a>.
       </p>
+
+      <h2>Payroll staff</h2>
+      <p className="small muted">
+        Staff (set by STAFF_EMAILS in Vercel) work in every client company from the <a href="/ops">payroll desk</a>: they add clients, enter employees
+        and hours, run payroll and print. They are not admins. Remove an email from STAFF_EMAILS to revoke access.
+      </p>
+      {staffList.length === 0 ? <p className="small">No staff yet. Add STAFF_EMAILS in Vercel, redeploy, then send the invite here.</p> : (
+        <table>
+          <tbody>
+            {staffList.map((email) => {
+              const u = staffUsers.find((x) => x.email === email);
+              const st = loginStatus(u);
+              return (
+                <tr key={email}>
+                  <td>{u?.name ?? ""} <span className="muted">({email})</span></td>
+                  <td className="small muted">{st.label}</td>
+                  <td>
+                    {(!u || st.pending) && (
+                      <form action={sendStaffInvite} className="actions">
+                        <input type="hidden" name="email" value={email} />
+                        {!u && <input name="name" placeholder="Their name" aria-label="Their name" required style={{ width: "12rem" }} />}
+                        <button type="submit" className="secondary">{u ? "Resend invite" : "Send login invite"}</button>
+                      </form>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
 
       <h2>Admin access log</h2>
       <div className="table-wrap">

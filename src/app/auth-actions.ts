@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { hashPassword, passwordProblem, verifyPassword } from "@/lib/auth/password";
 import { endSession, startSession, requireUser } from "@/lib/auth/session";
-import { adminAllowed } from "@/lib/auth/admins";
+import { adminAllowed, isStaffEmail } from "@/lib/auth/admins";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { normalizeEin } from "@/lib/app/ids";
 import { audit } from "@/lib/app/payroll-service";
@@ -53,6 +53,7 @@ export async function login(form: FormData) {
   if (user && invitePending(user)) back("/login", "Finish setting up your login with the link in your invite email first.");
   if (!user || !verifyPassword(password, user.passwordHash)) back("/login", "Email or password is wrong.");
   await startSession(user!.id);
+  if (isStaffEmail(user!.email)) redirect("/ops");
   if (user!.isPlatformAdmin && adminAllowed(user!.email)) redirect("/admin");
   if (user!.memberships.length === 0 && user!.employee) redirect("/me");
   redirect("/app");
@@ -71,6 +72,7 @@ export async function acceptInvite(form: FormData) {
   await db.user.update({ where: { id: user!.id }, data: { passwordHash: hashPassword(password), inviteTokenHash: null, inviteExpiresAt: null } });
   await audit(user!.id, user!.memberships[0]?.companyId ?? null, "invite.accepted");
   await startSession(user!.id);
+  if (isStaffEmail(user!.email)) redirect("/ops");
   if (user!.memberships.some((m) => m.role !== "EMPLOYEE")) redirect("/app");
   redirect(user!.employee ? "/me" : "/app");
 }

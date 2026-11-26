@@ -1,22 +1,21 @@
 import type { ReactNode } from "react";
 import { notFound, redirect } from "next/navigation";
 import { db } from "@/lib/db";
-import { adminEditingCompany, canUse, requireUser, roleIn, type Area } from "@/lib/auth/session";
+import { ROLE_LABEL, adminEditingCompany, canUse, requireUser, roleIn, type Area } from "@/lib/auth/session";
 import { logAdminView } from "@/lib/app/admin-view";
 import { startAdminEdit, stopAdminEdit } from "../../admin/actions";
 
 const NAV: { area: Area; href: string; label: string }[] = [
   { area: "dashboard", href: "", label: "Overview" },
-  { area: "people", href: "/people", label: "People" },
-  { area: "payroll", href: "/payroll", label: "Pay runs" },
-  { area: "filings", href: "/filings", label: "Tax filings" },
+  { area: "add_people", href: "/people", label: "People" },
+  { area: "reports", href: "/payroll", label: "Pay runs" },
+  { area: "reports", href: "/filings", label: "Tax filings" },
   { area: "advances", href: "/advances", label: "Advances" },
   { area: "settings", href: "/settings", label: "Company settings" },
   { area: "team", href: "/team", label: "Team access" },
-  { area: "billing", href: "/billing", label: "Plan and billing" },
+  { area: "reports", href: "/billing", label: "Plan and billing" },
 ];
 
-const ROLE_LABEL = { PLATFORM_ADMIN: "White Oak admin", CLIENT_OWNER: "Owner", CLIENT_HR: "HR (onboarding only)", EMPLOYEE: "Employee" } as const;
 
 export default async function CompanyLayout({ children, params }: { children: ReactNode; params: Promise<{ companyId: string }> }) {
   const { companyId } = await params;
@@ -58,8 +57,9 @@ export default async function CompanyLayout({ children, params }: { children: Re
       <nav className="app-nav" aria-label="Company">
         <span className="company">{company.tradeName ?? company.legalName}</span>
         <span className="small muted">{ROLE_LABEL[role]}</span>
+        {role === "PAYROLL_OPERATOR" && <a href="/ops" className="small">← Payroll desk (all clients)</a>}
         {NAV.filter((n) => canUse(role, n.area)).map((n) => (
-          <a key={n.area} href={`/app/${companyId}${n.href}`}>{n.label}</a>
+          <a key={n.href} href={`/app/${companyId}${n.href}`}>{n.label}</a>
         ))}
       </nav>
       <section>{children}</section>

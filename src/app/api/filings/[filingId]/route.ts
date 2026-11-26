@@ -8,7 +8,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ filingI
   const { filingId } = await params;
   const f = await db.filing.findUnique({ where: { id: filingId } });
   if (!f) return new Response("Not found", { status: 404 });
-  const ok = canUse(roleIn(user, f.companyId), "filings") || (await ownW2(user.id, f));
+  const ok = canUse(roleIn(user, f.companyId), "reports") || (await ownW2(user.id, f));
   if (!ok) return new Response("Not found", { status: 404 });
   const name = `${f.form}-${f.period}${f.recipient ? `-${f.recipient.replace(/[^A-Za-z0-9]+/g, "_")}` : ""}.pdf`;
   return new Response(Buffer.from(f.pdf), { headers: { "content-type": "application/pdf", "content-disposition": `attachment; filename="${name}"`, "cache-control": "private, no-store" } });

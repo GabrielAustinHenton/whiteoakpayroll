@@ -1,22 +1,24 @@
 import { db } from "@/lib/db";
-import { requireArea } from "@/lib/auth/session";
+import { canUse, requireArea } from "@/lib/auth/session";
 import { Notice, messages, prettyDate, usd } from "@/components/ui";
 import { FREQUENCY_LABEL, nextPeriod, type Frequency } from "@/lib/app/periods";
 import { startPayRun } from "../actions";
 
 export default async function Payroll({ params, searchParams }: { params: Promise<{ companyId: string }>; searchParams: Promise<Record<string, string>> }) {
   const { companyId } = await params;
-  await requireArea(companyId, "payroll");
+  const { role } = await requireArea(companyId, "reports");
+  const staff = canUse(role, "payroll");
   const { error, ok } = await messages(searchParams);
   const schedules = await db.paySchedule.findMany({ where: { companyId }, include: { payRuns: { where: { offCycle: false }, orderBy: { payday: "desc" }, take: 1 } } });
-  const runs = await db.payRun.findMany({ where: { companyId }, orderBy: { payday: "desc" }, include: { paySchedule: true, _count: { select: { lines: true } } } });
+  const runs = await db.payRun.findMany({ where: { companyId, ...(staff ? {} : { status: { in: ["APPROVED", "PAID"] } }) }, orderBy: { payday: "desc" }, include: { paySchedule: true, _count: { select: { lines: true } } } });
   const iso = (d: Date) => d.toISOString().slice(0, 10);
   return (
     <>
       <h1>Pay runs</h1>
       <Notice error={error} ok={ok} />
-      {schedules.length === 0 && <p className="notice">Create a pay schedule in <a href={`/app/${companyId}/settings#schedules`}>Company settings</a> first.</p>}
-      {schedules.map((s) => {
+      {!staff && <p className="muted">White Oak runs your payroll. Open a pay run for its register, paystubs and checks.</p>}
+      {staff && schedules.length === 0 && <p className="notice">Create a pay schedule in <a href={`/app/${companyId}/settings#schedules`}>Company settings</a> first.</p>}
+      {staff && schedules.map((s) => {
         const p = nextPeriod(s.frequency as Frequency, iso(s.anchorPayday), s.payLagDays, s.payRuns[0] ? iso(s.payRuns[0].payday) : null);
         return (
           <div className="card" key={s.id}>

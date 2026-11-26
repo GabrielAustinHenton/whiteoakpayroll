@@ -62,6 +62,7 @@ export async function recalculate(payRunId: string) {
     const detail = computePaycheck(e, {
       frequency: run.paySchedule.frequency as Frequency,
       hours: line.hours,
+      overtimeHours: line.overtimeHours,
       bonus: line.bonusCents,
       company: { suiRate: acct?.suiRate ?? 0, orTransitDistrict: acct?.orTransitDistrict },
       employerSize: Math.max(employerSize, 1),

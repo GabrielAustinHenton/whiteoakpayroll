@@ -34,6 +34,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
             <a href="/pricing">Pricing</a>
             {user ? (
               <>
+                {user.isStaff && <a href="/ops">Payroll desk</a>}
                 {user.isPlatformAdmin && <a href="/admin">Admin</a>}
                 {user.memberships.length > 0 && <a href="/app">My company</a>}
                 <a href="/me">My pay</a>

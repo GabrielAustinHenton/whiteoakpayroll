@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import type { Employee, User } from "@prisma/client";
+import type { User } from "@prisma/client";
 import { db } from "@/lib/db";
 import { appUrl, buttonEmail, sendEmail } from "@/lib/email";
 
@@ -22,7 +22,7 @@ export interface InviteOutcome {
 }
 
 /** Issue a fresh invite link for a login that has no password yet, and email it. */
-async function emailInvite(user: Pick<User, "id" | "email" | "name">, companyName: string, purpose: "portal" | "team"): Promise<InviteOutcome> {
+async function emailInvite(user: Pick<User, "id" | "email" | "name">, companyName: string, purpose: "team" | "staff"): Promise<InviteOutcome> {
   const token = randomBytes(32).toString("base64url");
   await db.user.update({
     where: { id: user.id },
@@ -33,11 +33,11 @@ async function emailInvite(user: Pick<User, "id" | "email" | "name">, companyNam
   const res = await sendEmail(
     buttonEmail({
       to: user.email,
-      subject: purpose === "portal" ? `${companyName} set up your payroll portal` : `You're invited to ${companyName} on White Oak Payroll`,
+      subject: purpose === "staff" ? "Your White Oak Payroll staff login" : `You're invited to ${companyName} on White Oak Payroll`,
       lines:
-        purpose === "portal"
-          ? [`Hi ${first},`, `${companyName} pays you through White Oak Payroll. Your employee portal is ready: see your paystubs and W-2s there, and request a payday advance where your employer offers them.`, "Choose a password to finish setting up your login."]
-          : [`Hi ${first},`, `You've been given access to ${companyName}'s payroll on White Oak Payroll.`, "Choose a password to finish setting up your login."],
+        purpose === "staff"
+          ? [`Hi ${first},`, "Your White Oak Payroll staff login is ready. From the payroll desk you can work on every client company.", "Choose a password to finish setting up your login."]
+          : [`Hi ${first},`, `You've been given access to ${companyName}'s payroll reports on White Oak Payroll.`, "Choose a password to finish setting up your login."],
       button: "Set up my login",
       url,
       after: [`This link works once and expires in ${INVITE_DAYS} days. If you weren't expecting it, you can ignore this email.`],
@@ -48,18 +48,13 @@ async function emailInvite(user: Pick<User, "id" | "email" | "name">, companyNam
 }
 
 /** Tell an existing White Oak user they have new access. */
-async function emailAccess(user: Pick<User, "email" | "name">, companyName: string, purpose: "portal" | "team"): Promise<InviteOutcome> {
+async function emailAccess(user: Pick<User, "email" | "name">, companyName: string, purpose: "team" | "staff"): Promise<InviteOutcome> {
   const url = `${appUrl()}/login`;
   const res = await sendEmail(
     buttonEmail({
       to: user.email,
-      subject: purpose === "portal" ? `${companyName} added you to its employee portal` : `You now have access to ${companyName} on White Oak Payroll`,
-      lines: [
-        `Hi ${user.name.split(" ")[0] || user.name},`,
-        purpose === "portal"
-          ? `${companyName} pays you through White Oak Payroll. Sign in with your existing White Oak login to see your paystubs and W-2s.`
-          : `You've been given access to ${companyName}'s payroll. Sign in with your existing White Oak login.`,
-      ],
+      subject: `You now have access to ${companyName} on White Oak Payroll`,
+      lines: [`Hi ${user.name.split(" ")[0] || user.name},`, `You've been given access to ${companyName}'s payroll reports. Sign in with your existing White Oak login.`],
       button: "Sign in",
       url,
     }),
@@ -69,45 +64,19 @@ async function emailAccess(user: Pick<User, "email" | "name">, companyName: stri
     : { emailed: false, message: `${user.email} already has a White Oak login and now has access (they sign in with their existing password). ${res.reason}` };
 }
 
-/**
- * Make sure an employee has a portal login for their current email, inviting them if needed.
- * Called whenever an employee is added or saved. Returns null when nothing changed.
- */
-export async function ensurePortalInvite(e: Pick<Employee, "id" | "companyId" | "email" | "firstName" | "lastName" | "userId">, companyName: string): Promise<InviteOutcome | { error: string } | null> {
-  const email = e.email.trim().toLowerCase();
-  const name = `${e.firstName} ${e.lastName}`;
-  if (e.userId) {
-    const u = await db.user.findUniqueOrThrow({ where: { id: e.userId }, include: { memberships: true } });
-    if (u.email === email) return null;
-    // Their email changed. Move the login over if it is only this portal login; otherwise they keep it.
-    const portalOnly = !u.isPlatformAdmin && u.memberships.every((m) => m.role === "EMPLOYEE" && m.companyId === e.companyId);
-    if (!portalOnly) return { error: `The portal login stays on ${u.email} because that login is also used for other access.` };
-    if (await db.user.findUnique({ where: { email } })) return { error: `${email} already belongs to another White Oak login, so the portal login stays on ${u.email}.` };
-    const moved = await db.user.update({ where: { id: u.id }, data: { email, name } });
-    if (invitePending(moved)) return emailInvite(moved, companyName, "portal");
-    await db.session.deleteMany({ where: { userId: u.id } });
-    return { emailed: false, message: `Their portal login is now ${email} (same password).` };
-  }
-  const existing = await db.user.findUnique({ where: { email }, include: { employee: true } });
-  if (existing) {
-    if (existing.employee) return { error: `${email} is already the portal login of another employee record, so no portal invite was sent.` };
-    await db.$transaction([
-      db.membership.upsert({ where: { userId_companyId: { userId: existing.id, companyId: e.companyId } }, create: { userId: existing.id, companyId: e.companyId, role: "EMPLOYEE" }, update: {} }),
-      db.employee.update({ where: { id: e.id }, data: { userId: existing.id } }),
-    ]);
-    if (invitePending(existing)) return emailInvite(existing, companyName, "portal");
-    return emailAccess(existing, companyName, "portal");
-  }
-  const u = await db.user.create({ data: { email, name, passwordHash: "", memberships: { create: { companyId: e.companyId, role: "EMPLOYEE" } } } });
-  await db.employee.update({ where: { id: e.id }, data: { userId: u.id } });
-  return emailInvite(u, companyName, "portal");
-}
-
 /** Resend a pending invite with a new link (the old link stops working). */
-export async function resendInvite(userId: string, companyName: string, purpose: "portal" | "team") {
+export async function resendInvite(userId: string, companyName: string, purpose: "team" | "staff") {
   const u = await db.user.findUniqueOrThrow({ where: { id: userId } });
   if (!invitePending(u)) return { emailed: false, message: `${u.email} has already set up their login.` } satisfies InviteOutcome;
   return emailInvite(u, companyName, purpose);
+}
+
+/** Send a White Oak staff member a login invite (no company membership: STAFF_EMAILS grants access). */
+export async function inviteStaffLogin(email: string, name: string): Promise<InviteOutcome> {
+  const existing = await db.user.findUnique({ where: { email } });
+  if (existing && !invitePending(existing)) return { emailed: false, message: `${email} already has a login; they now sign in as staff.` };
+  const u = existing ?? (await db.user.create({ data: { email, name, passwordHash: "" } }));
+  return emailInvite(u, "White Oak Payroll", "staff");
 }
 
 /** Give a teammate access, creating and inviting a login if they don't have one. */

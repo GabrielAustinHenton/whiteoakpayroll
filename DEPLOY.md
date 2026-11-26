@@ -59,9 +59,20 @@ Use Neon through Vercel; it is standard Postgres, so it can move later.
   in the admin bar (asks for a reason, lasts one hour). Every view and edit-mode start is logged.
 - To remove an admin, delete their email from `ADMIN_EMAILS` and redeploy.
 
-## Turning on email (employee and teammate invites)
+## Adding payroll staff (for example Olga)
 
-Adding an employee emails them an invite to the employee portal; adding a teammate does the same.
+Staff enter every client's data and run payroll from the **payroll desk** (`/ops`). They are not admins.
+
+1. In Vercel open **Settings → Environment Variables**, add `STAFF_EMAILS` with the staff email (several
+   are separated by commas), and redeploy.
+2. Sign in as an admin, open https://whiteoakpayroll.com/admin, find **Payroll staff**, type their name and
+   click **Send login invite**. If email isn't set up yet, the page shows the invite link: send it to them.
+3. They open the link, choose a password, and land on the payroll desk. To remove someone, delete their
+   email from `STAFF_EMAILS` and redeploy.
+
+## Turning on email (logins for staff and client owners)
+
+Inviting staff or a client's owner emails them a link to choose a password.
 Email goes through [Resend](https://resend.com) (free for 3,000 emails a month). Until it is set up,
 the app shows the invite link on screen after you save, so you can send it yourself.
 
