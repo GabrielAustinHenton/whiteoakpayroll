@@ -6,14 +6,15 @@ Launch states: Connecticut, Massachusetts, Oregon, New York.
 
 ## Stack
 
-Next.js (App Router, TypeScript), PostgreSQL with Prisma, Vitest. Tax calculation, filings, and ACH money movement are planned to come from an embedded payroll provider behind `src/lib/providers/payroll-provider.ts`.
+Next.js (App Router, TypeScript), PostgreSQL with Prisma, Vitest. Tax calculation and filings are built in-house (`src/lib/tax-engine/`). Money movement (ACH direct deposit and tax payments) will go through TD Bank and is not integrated yet.
 
 ## Layout
 
 | Path | What it holds |
 | --- | --- |
 | `src/lib/pricing.ts` | Tier pricing (placeholder $25 per 5 people) and add-on modules (Time Tracking, PTO) |
-| `src/lib/taxes/` | 2026 federal rates and the employer tax cost calculator |
+| `src/lib/tax-engine/` | In-house tax engine: versioned tax tables with sources (`tables/<year>/`), federal withholding (Pub. 15-T), FICA, FUTA, deduction taxability, paycheck calculator |
+| `src/lib/taxes/` | Employer tax cost preview and state paid leave contributions |
 | `src/lib/payroll/schedules.ts` | Pay frequency rules for CT, MA, OR, NY |
 | `src/lib/payroll/advances.ts` | Zero-interest payday advances repaid by payroll deduction (CT only for now) |
 | `prisma/schema.prisma` | Data model: companies, roles, employees, contractors, pay runs, advances, retirement, sick leave, filings |
@@ -29,4 +30,4 @@ npm test
 npm run typecheck
 ```
 
-Tax rates in `src/lib/taxes/rates-2026.ts` are marked for verification against IRS and SSA sources before launch.
+Every tax figure in `src/lib/tax-engine/tables/` carries its official source and a `verified` flag. Figures with `verified: false` must be checked against the cited source before live payroll.
