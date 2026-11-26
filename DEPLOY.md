@@ -40,13 +40,24 @@ Use Neon through Vercel; it is standard Postgres, so it can move later.
    | Name | Value |
    |------|-------|
    | `ADMIN_SETUP_TOKEN` | any long random phrase you keep private (12+ characters) |
+   | `ADMIN_EMAILS` | the White Oak staff emails allowed to be admins, comma-separated |
 
    `TEST_IDS_ONLY` is on by default: only test SSNs (000-xx-xxxx) and EINs (00-xxxxxxx) are accepted
    until SSNs are encrypted and the security review is done. Do not set it to `false` before then.
 5. Merge the pull request (or, if already merged, open **Deployments**, click **⋯** on the latest one and
    **Redeploy**). The build creates the database tables automatically (`prisma migrate deploy`).
-6. Go to https://whiteoakpayroll.com/signup and create the first company. To make that login a White Oak
-   admin (sees every client), go to https://whiteoakpayroll.com/admin/claim and enter `ADMIN_SETUP_TOKEN`.
+6. Each White Oak admin goes to https://whiteoakpayroll.com/admin/setup and enters their name, email (one on
+   `ADMIN_EMAILS`), a password and the setup code (`ADMIN_SETUP_TOKEN`). If that email already has a login,
+   they enter its current password and it becomes an admin. Admins land on https://whiteoakpayroll.com/admin.
+
+### The admin portal
+
+- `/admin` lists every client company with its owner, headcount, plan tier, add-ons and monthly price, plus
+  totals (monthly run rate, billed this month and last month), a "needs attention" list, filing deadlines
+  across clients, billing by month, the admin list and the admin access log.
+- Opening a client shows their account **read-only**. To change something for a client, turn on edit mode
+  in the admin bar (asks for a reason, lasts one hour). Every view and edit-mode start is logged.
+- To remove an admin, delete their email from `ADMIN_EMAILS` and redeploy.
 
 ## Moving off Vercel later
 
