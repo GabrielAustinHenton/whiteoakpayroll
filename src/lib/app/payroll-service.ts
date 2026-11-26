@@ -189,22 +189,44 @@ export async function generateFilings(companyId: string, period: string, actorId
 }
 
 /** People paid in a month (employees + contractors) set the tier; add-ons come from the company's modules. */
-export async function refreshInvoice(companyId: string, month: string) {
+async function monthBill(companyId: string, month: string, includeDraftRunId?: string) {
   const [y, mo] = month.split("-").map(Number);
   const from = new Date(Date.UTC(y, mo - 1, 1));
   const to = new Date(Date.UTC(y, mo, 1));
-  const lines = await db.payRunLine.findMany({ where: { payRun: { companyId, status: "PAID", payday: { gte: from, lt: to } }, grossCents: { gt: 0 } }, select: { employeeId: true } });
-  const pays = await db.contractorPayment.findMany({ where: { contractor: { companyId }, paidOn: { gte: from, lt: to }, OR: [{ payRunId: null }, { payRun: { status: "PAID" } }] }, select: { contractorId: true } });
+  const runFilter = includeDraftRunId ? { OR: [{ status: "PAID" as const }, { id: includeDraftRunId }] } : { status: "PAID" as const };
+  const lines = await db.payRunLine.findMany({ where: { payRun: { companyId, payday: { gte: from, lt: to }, ...runFilter }, grossCents: { gt: 0 } }, select: { employeeId: true } });
+  const pays = await db.contractorPayment.findMany({
+    where: { contractor: { companyId }, paidOn: { gte: from, lt: to }, OR: [{ payRunId: null }, { payRun: runFilter }] },
+    select: { contractorId: true },
+  });
   const people = new Set([...lines.map((l) => `e:${l.employeeId}`), ...pays.map((p) => `c:${p.contractorId}`)]).size;
   const modules = await db.companyModule.findMany({ where: { companyId } });
   const addOns = modules.map((m) => (m.addOn === "PTO" ? "pto" : "time_tracking") as AddOnKey);
-  const bill = monthlyBill(people, addOns);
+  return { people, bill: monthlyBill(people, addOns) };
+}
+
+export async function refreshInvoice(companyId: string, month: string) {
+  const { people, bill } = await monthBill(companyId, month);
   await db.invoice.upsert({
     where: { companyId_month: { companyId, month } },
     create: { companyId, month, peoplePaid: people, tier: bill.tier, totalCents: bill.total, lines: bill as unknown as Prisma.InputJsonValue },
     update: { peoplePaid: people, tier: bill.tier, totalCents: bill.total, lines: bill as unknown as Prisma.InputJsonValue },
   });
   return bill;
+}
+
+/**
+ * The White Oak fee for a pay run's month, counting this run's people (even while it is a draft).
+ * The fee is one flat monthly charge billed on the 1st of the next month; it is never added to a
+ * pay run's cash, and paying the same people again that month does not raise it.
+ */
+export async function feeForRun(payRunId: string) {
+  const run = await db.payRun.findUniqueOrThrow({ where: { id: payRunId } });
+  const month = iso(run.payday).slice(0, 7);
+  const { people, bill } = await monthBill(run.companyId, month, run.status === "DRAFT" ? run.id : undefined);
+  const [y, mo] = month.split("-").map(Number);
+  const billedOn = new Date(Date.UTC(y, mo, 1));
+  return { month, people, bill, billedOn };
 }
 
 type Tx = Parameters<Parameters<typeof db.$transaction>[0]>[0];
