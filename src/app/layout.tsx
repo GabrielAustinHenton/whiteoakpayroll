@@ -11,6 +11,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <body>
+        <div className="preview-banner" role="note">
+          Preview: White Oak Payroll is not processing payroll yet. Numbers shown are examples.
+        </div>
         <header className="site-header">
           <a href="/" className="brand">White Oak Payroll</a>
           <nav>
