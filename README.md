@@ -21,6 +21,7 @@ Next.js (App Router, TypeScript), PostgreSQL with Prisma, Vitest. Tax calculatio
 | `docs/registrations.md` | IRS, SSA and state registrations needed before filing for clients |
 | `src/lib/payroll/schedules.ts` | Pay frequency rules for CT, MA, OR, NY |
 | `src/lib/payroll/advances.ts` | Zero-interest payday advances repaid by payroll deduction (CT only for now) |
+| `src/lib/onboarding/` | Onboarding forms: Form W-4 (2026), CT-W4, M-4, OR-W-4, IT-2104, and Form I-9 (01/20/25) with deadlines and retention. See `docs/onboarding-forms.md` |
 | `prisma/schema.prisma` | Data model: companies, roles, employees, contractors, pay runs, advances, retirement, sick leave, filings |
 | `src/app/` | Marketing pages, pricing calculator, sample pay run cost preview |
 | `src/app/signup`, `login`, `app/[companyId]/…` | The payroll app: self-serve signup, company settings, people (employees, contractors, W-4 and state forms, I-9, offboarding), pay runs (review, approve, paystubs, paper checks), tax filings archive, advances, team access, billing |
