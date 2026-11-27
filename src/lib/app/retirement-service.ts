@@ -1,5 +1,6 @@
 import type { Employee, Prisma, RetirementElection, RetirementPlan } from "@prisma/client";
 import { db } from "../db";
+import { revealSsn } from "../security/field-crypto";
 import type { LineDetail, EmployeeRetirement } from "./engine";
 import {
   buildProviderFiles,
@@ -116,7 +117,7 @@ export async function buildRetirementSubmission(payRunId: string) {
       employeeId: e.id,
       firstName: e.firstName,
       lastName: e.lastName,
-      ssn: e.ssn,
+      ssn: revealSsn(e),
       birthDate: e.birthDate ? iso(e.birthDate) : "",
       hireDate: iso(e.hireDate),
       terminationDate: e.terminationDate ? iso(e.terminationDate) : null,
@@ -170,8 +171,8 @@ export async function markSubmissionSent(companyId: string, submissionId: string
 export async function importElections(companyId: string, planId: string, text: string) {
   const plan = await db.retirementPlan.findFirstOrThrow({ where: { id: planId, companyId } });
   const { elections, problems } = readElectionReport(text);
-  const employees = await db.employee.findMany({ where: { companyId }, select: { id: true, ssn: true } });
-  const bySsn = new Map(employees.map((e) => [e.ssn.replace(/\D/g, ""), e.id]));
+  const employees = await db.employee.findMany({ where: { companyId }, select: { id: true, ssn: true, ssnEncrypted: true } });
+  const bySsn = new Map(employees.map((e) => [revealSsn(e).replace(/\D/g, ""), e.id]));
   let updated = 0;
   for (const x of elections) {
     const employeeId = bySsn.get(x.ssn);

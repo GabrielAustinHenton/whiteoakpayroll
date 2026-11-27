@@ -1,3 +1,4 @@
+import { ssnLast4 } from "../security/field-crypto";
 import { db } from "../db";
 import type { CurrentUser } from "../auth/session";
 import { canUse, roleIn } from "../auth/session";
@@ -63,7 +64,7 @@ export function paystubDoc(p: Paystub): FormDoc {
     period: `Payday ${iso(r.payday)}`,
     parties: [
       { label: "Employer", lines: [p.company.legalName, p.company.addressLine1, `${p.company.city}, ${p.company.state} ${p.company.zip}`] },
-      { label: "Employee", lines: [`${p.employee.firstName} ${p.employee.lastName}`, `SSN ***-**-${p.employee.ssn.slice(-4)}`, `Pay period ${iso(r.periodStart)} to ${iso(r.periodEnd)}`] },
+      { label: "Employee", lines: [`${p.employee.firstName} ${p.employee.lastName}`, `SSN ***-**-${ssnLast4(p.employee)}`, `Pay period ${iso(r.periodStart)} to ${iso(r.periodEnd)}`] },
     ],
     sections: [
       { heading: "Earnings", rows: [...p.earnings.map(row), { label: "Gross pay", value: `${usd(p.gross.current)}   YTD ${usd(p.gross.ytd)}` }] },
