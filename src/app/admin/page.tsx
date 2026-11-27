@@ -4,7 +4,7 @@ import { loginStatus } from "@/lib/app/invites";
 import { sendStaffInvite } from "../ops/actions";
 import { adminEmails, staffEmails } from "@/lib/auth/admins";
 import { loadPortal } from "@/lib/app/admin-metrics";
-import { PRICING } from "@/lib/pricing";
+import { PRICING, priceLabel } from "@/lib/pricing";
 import { Notice, messages, prettyDate, usd } from "@/components/ui";
 
 export const metadata = { title: "Admin · White Oak Payroll" };
@@ -49,7 +49,7 @@ export default async function Admin({ searchParams }: { searchParams: Promise<Re
         <div className="stat"><span className="small muted">Filings overdue</span><b>{overdue}</b><span className="small muted">{p.alerts.length} other alerts</span></div>
       </div>
       <p className="small muted">
-        Run rate = each company&apos;s monthly price if all its active people are paid this month ({usd(PRICING.pricePerTier)} per 5 people, add-ons
+        Run rate = each company&apos;s monthly price if all its active people are paid this month ({priceLabel()}, add-ons
         at their listed price). Prices are placeholders and no card is charged in preview.
       </p>
 

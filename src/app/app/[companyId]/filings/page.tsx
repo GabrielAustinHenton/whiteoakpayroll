@@ -7,8 +7,8 @@ const ORDER = ["941", "940", "W-3", "W-2", "1096", "1099-NEC", "CT-941", "CT-W3"
 
 export default async function Filings({ params, searchParams }: { params: Promise<{ companyId: string }>; searchParams: Promise<Record<string, string>> }) {
   const { companyId } = await params;
-  const { role } = await requireArea(companyId, "reports");
-  const staff = canUse(role, "filings");
+  const { role, mode } = await requireArea(companyId, "reports");
+  const staff = canUse(role, "filings", mode);
   const { error, ok } = await messages(searchParams);
   const filings = await db.filing.findMany({ where: { companyId }, orderBy: [{ period: "desc" }, { form: "asc" }], select: { id: true, form: true, period: true, recipient: true, status: true, generatedAt: true, filedAt: true } });
   const runs = await db.payRun.findMany({ where: { companyId, status: "PAID" }, select: { payday: true } });

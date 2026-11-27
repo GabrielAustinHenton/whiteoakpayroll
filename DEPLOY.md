@@ -83,9 +83,12 @@ for a lost phone. Client owners, HR and employees can turn it on from **Account*
   again. Remove the variable afterwards.
 - Local development without a phone: `TWO_STEP_FOR_STAFF=off`.
 
-## Turning on email (logins for staff and client owners)
+## Turning on email (logins, invites and password resets)
 
-Inviting staff or a client's owner emails them a link to choose a password.
+Inviting staff or a client's owner emails them a link to choose a password, and "Forgot password?" on the
+sign-in page emails a one-time reset link (valid for an hour). Until email is set up, invite links are shown
+on screen, but reset links are never shown (that would let anyone reset anyone's password), so resets
+only work once Resend is on.
 Email goes through [Resend](https://resend.com) (free for 3,000 emails a month). Until it is set up,
 the app shows the invite link on screen after you save, so you can send it yourself.
 
@@ -107,6 +110,28 @@ the app shows the invite link on screen after you save, so you can send it yours
 6. Redeploy (**Deployments → ⋯ → Redeploy**) so the new variables take effect.
 
 Invite links work once and expire after 14 days. A pending invite can be resent from the employee's page.
+
+## Turning on the daily automation (draft pay runs and reminders)
+
+Once a day the app prepares each self-serve company's next pay run a week before payday and emails
+owners when a run needs approval, an I-9 is due, or a quarterly return is coming up. It never approves
+or pays anything by itself.
+
+1. In Vercel open **Settings → Environment Variables** and add `CRON_SECRET` with a long random value
+   (at least 16 characters; for example run `openssl rand -hex 24`).
+2. Redeploy. `vercel.json` already schedules `/api/cron/daily` for 12:00 UTC (7 AM Eastern); Vercel
+   sends the secret itself. On another host, call `GET /api/cron/daily` once a day with the header
+   `Authorization: Bearer <CRON_SECRET>`.
+
+Reminder emails need email turned on (above). Without `CRON_SECRET` the endpoint is off.
+
+## Self-serve and managed companies
+
+Each company is either **self-serve** (the owner runs payroll; employees use the portal) or **managed**
+(White Oak staff run it from the payroll desk). New signups are self-serve; companies staff create from
+the payroll desk, and every company that existed before this change, are managed. An admin can switch a
+company on its admin page. Per-company feature switches (employee portal, self-onboarding, advances,
+automatic draft runs, reminder emails) are in the company's settings.
 
 ## Moving off Vercel later
 

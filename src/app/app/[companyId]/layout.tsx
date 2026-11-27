@@ -11,6 +11,7 @@ const NAV: { area: Area; href: string; label: string }[] = [
   { area: "reports", href: "/payroll", label: "Pay runs" },
   { area: "reports", href: "/filings", label: "Tax filings" },
   { area: "advances", href: "/advances", label: "Advances" },
+  { area: "settings", href: "/setup", label: "Setup guide" },
   { area: "settings", href: "/settings", label: "Company settings" },
   { area: "team", href: "/team", label: "Team access" },
   { area: "reports", href: "/billing", label: "Plan and billing" },
@@ -25,6 +26,7 @@ export default async function CompanyLayout({ children, params }: { children: Re
   if (role === "EMPLOYEE") redirect("/me");
   const company = await db.company.findUnique({ where: { id: companyId } });
   if (!company) notFound();
+  const mode = company.serviceMode;
   const isAdmin = role === "PLATFORM_ADMIN";
   const editing = isAdmin && (await adminEditingCompany()) === companyId;
   if (isAdmin) await logAdminView(user.id, companyId);
@@ -58,7 +60,7 @@ export default async function CompanyLayout({ children, params }: { children: Re
         <span className="company">{company.tradeName ?? company.legalName}</span>
         <span className="small muted">{ROLE_LABEL[role]}</span>
         {role === "PAYROLL_OPERATOR" && <a href="/ops" className="small">← Payroll desk (all clients)</a>}
-        {NAV.filter((n) => canUse(role, n.area)).map((n) => (
+        {NAV.filter((n) => canUse(role, n.area, mode)).map((n) => (
           <a key={n.href} href={`/app/${companyId}${n.href}`}>{n.label}</a>
         ))}
       </nav>
