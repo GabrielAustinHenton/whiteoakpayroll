@@ -11,6 +11,7 @@ import { audit } from "@/lib/app/payroll-service";
 import { invitePending, userForInvite } from "@/lib/app/invites";
 import { requestPasswordReset, userForReset } from "@/lib/app/password-reset";
 import { str } from "@/components/ui";
+import { landingFor } from "@/lib/auth/landing";
 
 const back = (path: string, error: string) => redirect(`${path}?error=${encodeURIComponent(error)}`);
 
@@ -53,11 +54,12 @@ export async function login(form: FormData) {
   const user = await db.user.findUnique({ where: { email }, include: { memberships: true, employee: true } });
   if (user && invitePending(user)) back("/login", "Finish setting up your login with the link in your invite email first.");
   if (!user || !verifyPassword(password, user.passwordHash)) back("/login", "Email or password is wrong.");
+  if (user!.totpEnabledAt) {
+    await startSession(user!.id, { mfaPending: true });
+    redirect("/login/two-step");
+  }
   await startSession(user!.id);
-  if (isStaffEmail(user!.email)) redirect("/ops");
-  if (user!.isPlatformAdmin && adminAllowed(user!.email)) redirect("/admin");
-  if (user!.memberships.length === 0 && user!.employee) redirect("/me");
-  redirect("/app");
+  redirect(landingFor(user!));
 }
 
 /** Accept an emailed invite: choose a password, then go straight in. */
@@ -72,8 +74,12 @@ export async function acceptInvite(form: FormData) {
   if (password !== String(form.get("confirm") ?? "")) back(here, "The two passwords don't match.");
   await db.user.update({ where: { id: user!.id }, data: { passwordHash: hashPassword(password), inviteTokenHash: null, inviteExpiresAt: null } });
   await audit(user!.id, user!.memberships[0]?.companyId ?? null, "invite.accepted");
+  if (user!.totpEnabledAt) {
+    await startSession(user!.id, { mfaPending: true });
+    redirect("/login/two-step");
+  }
   await startSession(user!.id);
-  if (isStaffEmail(user!.email)) redirect("/ops");
+  if (isStaffEmail(user!.email)) redirect(landingFor(user!));
   if (user!.memberships.some((m) => m.role !== "EMPLOYEE")) redirect("/app");
   redirect(user!.employee ? "/me" : "/app");
 }
@@ -99,6 +105,11 @@ export async function resetPassword(form: FormData) {
     db.session.deleteMany({ where: { userId: user!.id } }),
   ]);
   await audit(user!.id, null, "password.reset");
+  // A reset link proves the email, not the phone: two-step sign-in still asks for its code.
+  if (user!.totpEnabledAt) {
+    await startSession(user!.id, { mfaPending: true });
+    redirect("/login/two-step");
+  }
   await startSession(user!.id);
   redirect("/app?ok=Password+changed");
 }
@@ -166,6 +177,10 @@ export async function setupAdmin(form: FormData) {
     user = await db.user.create({ data: { email, name, passwordHash: hashPassword(password), isPlatformAdmin: true } });
   }
   await audit(user!.id, null, "admin.claimed", { via: "setup" });
+  if (user!.totpEnabledAt) {
+    await startSession(user!.id, { mfaPending: true });
+    redirect("/login/two-step");
+  }
   await startSession(user!.id);
   redirect("/admin");
 }

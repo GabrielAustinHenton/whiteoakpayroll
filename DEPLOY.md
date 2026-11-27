@@ -70,6 +70,19 @@ Staff enter every client's data and run payroll from the **payroll desk** (`/ops
 3. They open the link, choose a password, and land on the payroll desk. To remove someone, delete their
    email from `STAFF_EMAILS` and redeploy.
 
+## Two-step sign-in (required for admins and staff)
+
+Admins and payroll staff can see every client's Social Security numbers and bank details, so their
+logins need a code from an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password,
+Authy) as well as the password. The first time they sign in, the app takes them to **Account → Two-step
+sign-in**; until they finish, their White Oak access is paused. They get 10 one-time recovery codes
+for a lost phone. Client owners, HR and employees can turn it on from **Account** too (optional).
+
+- Lost phone and lost recovery codes: set `TWO_STEP_FOR_STAFF=off` in Vercel and redeploy to get back in,
+  then clear their old setup in the database (`totpSecret`, `totpEnabledAt` on the User) and set it up
+  again. Remove the variable afterwards.
+- Local development without a phone: `TWO_STEP_FOR_STAFF=off`.
+
 ## Turning on email (logins, invites and password resets)
 
 Inviting staff or a client's owner emails them a link to choose a password, and "Forgot password?" on the

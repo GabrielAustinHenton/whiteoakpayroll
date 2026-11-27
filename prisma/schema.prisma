@@ -80,6 +80,13 @@ model User {
   resetExpiresAt  DateTime?
   /** Only White Oak staff. Client roles live on Membership. */
   isPlatformAdmin Boolean   @default(false)
+  /** Two-step sign-in: base32 authenticator secret. Set while enrolling; active once totpEnabledAt is set. */
+  totpSecret      String?
+  totpEnabledAt   DateTime?
+  /** Last accepted 30-second step, so a code can't be used twice. */
+  totpLastStep    Int?
+  /** SHA-256 of each unused one-time recovery code. */
+  recoveryCodeHashes String[] @default([])
   createdAt    DateTime     @default(now())
   memberships  Membership[]
   sessions     Session[]
@@ -93,6 +100,9 @@ model Session {
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   expiresAt DateTime
+  /** Password was right but the two-step code is still owed; the session grants nothing yet. */
+  mfaPending  Boolean @default(false)
+  mfaAttempts Int     @default(0)
   createdAt DateTime @default(now())
 }
 

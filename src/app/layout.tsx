@@ -61,6 +61,11 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
             )}
           </nav>
         </header>
+        {user?.needsTwoStep && (
+          <div className="two-step-banner" role="alert">
+            Your White Oak admin or staff access is paused until you <a href="/account/two-step?required=1">turn on two-step sign-in</a>.
+          </div>
+        )}
         <main id="main" tabIndex={-1}>{children}</main>
       </body>
     </html>
