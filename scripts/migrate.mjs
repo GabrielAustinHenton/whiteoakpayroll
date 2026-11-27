@@ -11,5 +11,18 @@ const url =
 if (!url) {
   console.log("No database URL set: skipping prisma migrate deploy.");
 } else {
-  execSync("npx prisma migrate deploy", { stdio: "inherit", env: { ...e, DATABASE_URL: url } });
+  const env = { ...e, DATABASE_URL: url };
+  // Time Tracking migrations were briefly pushed under these names (2026-11-27). A database that
+  // already had the tables failed on them, and Prisma refuses every later deploy until a failed
+  // migration is marked rolled back. Their first statement failed, so nothing was applied.
+  // Marking one that was never attempted just errors, which is ignored.
+  for (const name of ["20261127050000_time_tracking", "20261127060000_timesheets", "20261127070000_kiosk"]) {
+    try {
+      execSync(`npx prisma migrate resolve --rolled-back ${name}`, { stdio: "ignore", env });
+      console.log(`Marked the abandoned migration ${name} as rolled back.`);
+    } catch {
+      // not recorded as failed: nothing to do
+    }
+  }
+  execSync("npx prisma migrate deploy", { stdio: "inherit", env });
 }
