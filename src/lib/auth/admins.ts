@@ -28,3 +28,14 @@ export function staffEmails(env: Record<string, string | undefined> = process.en
 export function isStaffEmail(email: string, env: Record<string, string | undefined> = process.env): boolean {
   return staffEmails(env).includes(email.trim().toLowerCase());
 }
+
+/**
+ * White Oak payroll staff: listed in STAFF_EMAILS, or asked to join at /staff/join and approved by
+ * an admin. Both get exactly the same access. A denied or removed request grants nothing.
+ */
+export function isStaffUser(
+  u: { email: string; staffStatus?: string | null },
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  return isStaffEmail(u.email, env) || u.staffStatus === "APPROVED";
+}

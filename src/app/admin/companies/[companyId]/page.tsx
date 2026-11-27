@@ -6,7 +6,7 @@ import { logAdminView } from "@/lib/app/admin-view";
 import { PRICING, priceLabel, type AddOnKey } from "@/lib/pricing";
 import { Notice, messages, prettyDate, usd } from "@/components/ui";
 import { FEATURES, FEATURE_KEYS, MODE_LABEL, featuresFor } from "@/lib/app/features";
-import { setServiceMode } from "../../actions";
+import { setCompanyBureau, setServiceMode } from "../../actions";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +17,7 @@ export default async function AdminCompany({ params, searchParams }: { params: P
   const user = await requireAdmin();
   const { error, ok } = await messages(searchParams);
   const { companyId } = await params;
+  const bureaus = await db.bureau.findMany({ orderBy: { name: "asc" } });
   const c = await db.company.findUnique({
     where: { id: companyId },
     include: {
@@ -84,6 +85,17 @@ export default async function AdminCompany({ params, searchParams }: { params: P
         <input type="hidden" name="serviceMode" value={c.serviceMode === "MANAGED" ? "SELF_SERVE" : "MANAGED"} />
         <button type="submit" className="secondary">{c.serviceMode === "MANAGED" ? "Switch to self-serve" : "Switch to managed by the payroll desk"}</button>
         <span className="small muted">Switching resets the company&apos;s feature switches to that mode&apos;s defaults.</span>
+      </form>
+
+      <h2>Bureau</h2>
+      <p className="small muted">Payroll staff only see companies in their own bureau. With no bureau, only White Oak admins can open this company.</p>
+      <form action={setCompanyBureau} className="actions">
+        <input type="hidden" name="companyId" value={c.id} />
+        <select name="bureauId" defaultValue={c.bureauId ?? ""} aria-label="Bureau">
+          <option value="">No bureau (White Oak admins only)</option>
+          {bureaus.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+        </select>
+        <button type="submit" className="secondary">Save bureau</button>
       </form>
 
       <h2>Company settings</h2>

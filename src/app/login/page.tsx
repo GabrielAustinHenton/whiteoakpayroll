@@ -15,7 +15,8 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         <p className="small"><a href="/forgot">Forgot password?</a></p>
         <button type="submit">Sign in</button>
         <p className="small muted">New company? <a href="/signup">Set up your company</a></p>
-        <p className="small muted">White Oak staff: <a href="/admin/setup">create your admin login</a></p>
+        <p className="small muted">Joining White Oak as payroll staff? <a href="/staff/join">Ask to join</a></p>
+        <p className="small muted">White Oak admins: <a href="/admin/setup">create your admin login</a></p>
       </form>
     </>
   );

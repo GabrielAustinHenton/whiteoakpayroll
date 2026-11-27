@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { requireStaff } from "@/lib/auth/session";
+import { ownsBureau, requireStaff } from "@/lib/auth/session";
 import { Field, Notice, StateSelect, messages, prettyDate } from "@/components/ui";
 import { FREQUENCY_LABEL, nextPeriod, type Frequency } from "@/lib/app/periods";
 import { testIdsOnly } from "@/lib/app/ids";
@@ -18,8 +18,9 @@ export default async function PayrollDesk({ searchParams }: { searchParams: Prom
   const { error, ok } = await messages(searchParams);
   const q = ((await searchParams).q ?? "").toString().trim().toLowerCase();
   const companies = await db.company.findMany({
-    // Self-serve companies run their own payroll; the desk lists the clients White Oak runs.
-    where: { serviceMode: "MANAGED" },
+    // Self-serve companies run their own payroll; the desk lists managed clients. Staff see only
+    // their own bureau's clients; admins see every managed client.
+    where: { serviceMode: "MANAGED", ...(user.isPlatformAdmin ? {} : { id: { in: user.bureauCompanyIds } }) },
     orderBy: { legalName: "asc" },
     include: {
       paySchedules: { include: { payRuns: { where: { offCycle: false, status: { not: "VOIDED" } }, orderBy: { payday: "desc" }, take: 1 } } },
@@ -27,6 +28,11 @@ export default async function PayrollDesk({ searchParams }: { searchParams: Prom
       _count: { select: { employees: { where: { status: { not: "TERMINATED" } } } } },
     },
   });
+  const [bureau, bureaus] = await Promise.all([
+    user.bureauId ? db.bureau.findUnique({ where: { id: user.bureauId } }) : null,
+    user.isPlatformAdmin ? db.bureau.findMany({ orderBy: { name: "asc" } }) : [],
+  ]);
+  const noBureau = !user.isPlatformAdmin && !bureau;
   type C = (typeof companies)[number];
   type Row = { c: C; name: string; schedule: C["paySchedules"][number] | null; next: ReturnType<typeof nextPeriod> | null; open: C["payRuns"][number] | null; due: number };
   const today = new Date(`${iso(new Date())}T00:00:00Z`).getTime();
@@ -47,8 +53,15 @@ export default async function PayrollDesk({ searchParams }: { searchParams: Prom
   return (
     <>
       <h1>Payroll desk</h1>
-      <p className="muted">Signed in as {user.name}. Every client, soonest payday first. Open a client to enter hours, approve, and print checks and paystubs.</p>
+      <p className="muted">
+        Signed in as {user.name}{bureau ? <> for <b>{bureau.name}</b></> : user.isPlatformAdmin ? " (admin: every bureau)" : ""}. Your clients,
+        soonest payday first. Open a client to enter hours, approve, and print checks and paystubs.
+      </p>
+      {ownsBureau(user) && <p><a href="/ops/team">Your staff and requests to join →</a></p>}
       <Notice error={error} ok={ok} />
+      {noBureau && (
+        <p className="notice" role="alert">You aren&apos;t assigned to a payroll bureau yet, so you can&apos;t see any clients. Ask a White Oak administrator to add you to your bureau.</p>
+      )}
       <form className="actions" method="get">
         <input name="q" defaultValue={q} placeholder="Find a client" aria-label="Find a client" style={{ width: "16rem" }} />
         <button type="submit" className="secondary">Search</button>
@@ -92,7 +105,15 @@ export default async function PayrollDesk({ searchParams }: { searchParams: Prom
         To give the owner a login for reports, use Team access in the company.
       </p>
       {testIdsOnly() && <p className="notice">Preview: EINs must start with 00 (for example 00-1234567).</p>}
-      <form action={addClientCompany} className="form">
+      {!noBureau && <form action={addClientCompany} className="form">
+        {user.isPlatformAdmin && (
+          <Field label="Bureau" hint="The bureau whose staff will run this client. Leave as White Oak to keep it to admins only.">
+            <select name="bureauId" defaultValue={user.bureauId ?? ""}>
+              <option value="">White Oak (admins only)</option>
+              {bureaus.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+          </Field>
+        )}
         <div className="row">
           <Field label="Legal name"><input name="legalName" required /></Field>
           <Field label="Doing business as (optional)"><input name="tradeName" /></Field>
@@ -105,7 +126,7 @@ export default async function PayrollDesk({ searchParams }: { searchParams: Prom
           <Field label="ZIP"><input name="zip" required pattern="\d{5}" /></Field>
         </div>
         <button type="submit">Add client</button>
-      </form>
+      </form>}
     </>
   );
 }

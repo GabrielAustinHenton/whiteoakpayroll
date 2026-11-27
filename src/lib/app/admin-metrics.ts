@@ -166,6 +166,7 @@ export async function loadPortal(now = new Date()) {
     const owner = c.memberships[0]?.user;
     return {
       id: c.id,
+      bureauId: c.bureauId,
       name: c.tradeName ? `${c.legalName} (${c.tradeName})` : c.legalName,
       legalName: c.legalName,
       state: c.state,

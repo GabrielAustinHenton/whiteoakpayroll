@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { hashPassword, passwordProblem, verifyPassword } from "@/lib/auth/password";
 import { endSession, startSession, requireUser } from "@/lib/auth/session";
-import { adminAllowed, isStaffEmail } from "@/lib/auth/admins";
+import { adminAllowed, isStaffUser } from "@/lib/auth/admins";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { normalizeEin } from "@/lib/app/ids";
 import { audit } from "@/lib/app/payroll-service";
@@ -79,7 +79,7 @@ export async function acceptInvite(form: FormData) {
     redirect("/login/two-step");
   }
   await startSession(user!.id);
-  if (isStaffEmail(user!.email)) redirect(landingFor(user!));
+  if (isStaffUser(user!)) redirect(landingFor(user!));
   if (user!.memberships.some((m) => m.role !== "EMPLOYEE")) redirect("/app");
   redirect(user!.employee ? "/me" : "/app");
 }

@@ -19,6 +19,14 @@ enum Role {
   EMPLOYEE // employee portal: own paystubs, W-2s, advances
 }
 
+/** A request to join White Oak as payroll staff (same access as STAFF_EMAILS), decided by an admin. */
+enum StaffRequestStatus {
+  PENDING
+  APPROVED
+  DENIED
+  REMOVED
+}
+
 enum PayFrequency {
   WEEKLY
   BIWEEKLY
@@ -87,10 +95,34 @@ model User {
   totpLastStep    Int?
   /** SHA-256 of each unused one-time recovery code. */
   recoveryCodeHashes String[] @default([])
+  /** Asked to join as White Oak payroll staff at /staff/join. Only APPROVED grants staff access. */
+  staffStatus      StaffRequestStatus?
+  staffRequestedAt DateTime?
+  /** What they told admins about themselves when asking. */
+  staffRequestNote String?
+  staffDecidedAt   DateTime?
+  staffDecidedById String?
+  /** The bureau (payroll firm) this staff member works for, or the one they asked to join. Staff only see that bureau's companies. */
+  bureauId         String?
+  bureau           Bureau?  @relation(fields: [bureauId], references: [id], onDelete: SetNull)
+  /** Owner of their bureau (e.g. Jose): approves, denies and removes that bureau's staff. Set by an admin. */
+  bureauOwner      Boolean  @default(false)
   createdAt    DateTime     @default(now())
   memberships  Membership[]
   sessions     Session[]
   employee     Employee?
+}
+
+/**
+ * A payroll bureau: a firm (e.g. a partner's service bureau) whose staff run payroll for its own
+ * client companies. Staff see only their bureau's companies; White Oak admins see everything.
+ */
+model Bureau {
+  id        String    @id @default(cuid())
+  name      String    @unique
+  createdAt DateTime  @default(now())
+  companies Company[]
+  staff     User[]
 }
 
 model Session {
@@ -127,6 +159,9 @@ model Company {
   features      Json            @default("{}")
   /** When the owner finished the setup wizard. */
   setupCompletedAt DateTime?
+  /** The payroll bureau that runs this company, if any. Only that bureau's staff can open it. */
+  bureauId      String?
+  bureau        Bureau?         @relation(fields: [bureauId], references: [id], onDelete: SetNull)
   createdAt     DateTime        @default(now())
   reminders     Reminder[]
   stateAccounts StateAccount[]
