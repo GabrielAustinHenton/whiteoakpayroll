@@ -87,3 +87,25 @@ h2 { margin-top: 32px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 tfoot th { border-top: 2px solid var(--line); }
 main:has(.admin-title) { max-width: 1280px; }
+
+/* Setup wizard and to-dos */
+.progress { height: 8px; background: var(--line); border-radius: 999px; overflow: hidden; margin: 12px 0 20px; }
+.progress span { display: block; height: 100%; background: var(--accent); }
+.wizard { display: grid; grid-template-columns: 260px 1fr; gap: 24px; align-items: start; }
+.wizard-body { margin: 0; }
+.wizard-body h2 { margin-top: 0; }
+.wizard-steps { list-style: none; padding: 0; margin: 0; display: grid; gap: 4px; }
+.wizard-steps a { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 8px; text-decoration: none; color: var(--fg); }
+.wizard-steps li.current a { background: var(--card); border: 1px solid var(--line); font-weight: 600; }
+.wizard-steps .dot { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 999px; border: 1px solid var(--line); font-size: 0.8rem; flex: none; }
+.wizard-steps li.done .dot { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+@media (max-width: 720px) { .wizard { grid-template-columns: 1fr; } }
+details.help { margin: 8px 0 16px; }
+details.help summary { cursor: pointer; color: var(--accent); }
+.todos { list-style: none; padding: 0; display: grid; gap: 8px; }
+.todos li { border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; padding: 10px 12px; background: var(--card); }
+.todos li.urgent { border-left-color: var(--danger); }
+.todos li a { font-weight: 600; }
+.flags { list-style: none; padding: 0; display: grid; gap: 6px; }
+.flags li { border-left: 4px solid #b7791f; padding: 6px 10px; background: var(--card); border-radius: 6px; }
+.flags li.block { border-left-color: var(--danger); }

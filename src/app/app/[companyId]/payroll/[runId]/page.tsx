@@ -4,10 +4,12 @@ import { canUse, requireArea } from "@/lib/auth/session";
 import { Notice, messages, prettyDate, usd } from "@/components/ui";
 import type { LineDetail } from "@/lib/app/engine";
 import { feeForRun } from "@/lib/app/payroll-service";
-import { PRICING } from "@/lib/pricing";
+import { PRICING, priceLabel } from "@/lib/pricing";
 import type { TaxLine } from "@/lib/tax-engine";
 import { DEDUCTION_LABELS } from "@/lib/pay-run/review";
 import { GridKeys } from "./grid-keys";
+import { runChecks } from "@/lib/app/run-checks";
+import { approveBy } from "@/lib/app/todos";
 import { approveRun, deleteDraftRun, removeContractorPayment, saveRunInputs, voidOrReissueCheck, importHours } from "../../actions";
 
 function group(details: LineDetail[], payer: "employee" | "employer") {
@@ -24,8 +26,8 @@ function group(details: LineDetail[], payer: "employee" | "employer") {
 
 export default async function PayRunPage({ params, searchParams }: { params: Promise<{ companyId: string; runId: string }>; searchParams: Promise<Record<string, string>> }) {
   const { companyId, runId } = await params;
-  const { role } = await requireArea(companyId, "reports");
-  const staff = canUse(role, "payroll");
+  const { role, mode } = await requireArea(companyId, "reports");
+  const staff = canUse(role, "payroll", mode);
   const { error, ok, sp } = await messages(searchParams);
   const imported = typeof sp.imported === "string" ? sp.imported : "";
   const run = await db.payRun.findFirst({
@@ -59,6 +61,8 @@ export default async function PayRunPage({ params, searchParams }: { params: Pro
     </>
   );
   const iso = (d: Date) => d.toISOString().slice(0, 10);
+  const flags = draft && staff ? await draftFlags(run, iso) : [];
+  const blocked = flags.some((f) => f.level === "stop");
 
   return (
     <>
@@ -213,7 +217,7 @@ export default async function PayRunPage({ params, searchParams }: { params: Pro
       <div className="card">
         <p className="big">{usd(fee.bill.total)}</p>
         <p>
-          <b>White Oak Payroll fee for {monthName}</b>: {fee.bill.tierRange ? `${fee.people} ${fee.people === 1 ? "person" : "people"} on payroll this month, tier ${fee.bill.tier} (${fee.bill.tierRange.from} to ${fee.bill.tierRange.to} people) at ${usd(PRICING.pricePerTier)}` : "nobody on payroll yet this month"}
+          <b>White Oak Payroll fee for {monthName}</b>: {fee.bill.tierRange ? `${fee.people} ${fee.people === 1 ? "person" : "people"} on payroll this month, tier ${fee.bill.tier} (${fee.bill.tierRange.from} to ${fee.bill.tierRange.to} people) at ${priceLabel()}` : "nobody on payroll yet this month"}
           {fee.bill.addOns.length > 0 && ` plus ${fee.bill.addOns.map((a) => `${a.name} ${usd(a.price)}`).join(", ")}`}.
         </p>
         <p className="small muted">
@@ -234,10 +238,16 @@ export default async function PayRunPage({ params, searchParams }: { params: Pro
       {draft && (
         <>
           <h2>3. Approve</h2>
+          {flags.length > 0 && (
+            <>
+              <p><b>Before you approve, check {flags.length === 1 ? "this" : `these ${flags.length} things`}:</b></p>
+              <ul className="flags">{flags.map((f, i) => <li key={i} className={f.level === "stop" ? "block" : ""}>{f.message}</li>)}</ul>
+            </>
+          )}
           <form action={approveRun} className="approve">
             {hidden}
             <label className="check"><input type="checkbox" name="confirm" /> I reviewed these totals. Take {usd(run.cashNeededCents)} from the company account and pay everyone on {prettyDate(run.payday)}.</label>
-            <button type="submit">Approve and pay (simulated)</button>
+            <button type="submit" disabled={blocked}>Approve and pay (simulated)</button>
           </form>
           <form action={deleteDraftRun} style={{ marginTop: 16 }}>
             {hidden}
@@ -247,4 +257,45 @@ export default async function PayRunPage({ params, searchParams }: { params: Pro
       )}
     </>
   );
+}
+
+type RunWithLines = { id: string; companyId: string; payScheduleId: string; payday: Date; lines: { employeeId: string; hours: number | null; overtimeHours: number; bonusCents: number; grossCents: number; netCents: number; employee: { firstName: string; lastName: string; payBasis: "HOURLY" | "SALARIED"; defaultHours: number; paymentMethod: string; bankLast4: string | null; i9CompletedAt: Date | null; hireDate: Date; terminationDate: Date | null } }[]; periodStart: Date; periodEnd: Date };
+
+/** Pre-run checks for a draft: unusual hours or pay, missing bank accounts, onboarding not done. */
+async function draftFlags(run: RunWithLines, iso: (d: Date) => string) {
+  const [previous, waiting] = await Promise.all([
+    db.payRunLine.findMany({
+      where: { employeeId: { in: run.lines.map((l) => l.employeeId) }, grossCents: { gt: 0 }, payRun: { status: "PAID", offCycle: false, payday: { lt: run.payday } } },
+      orderBy: { payRun: { payday: "desc" } },
+      select: { employeeId: true, grossCents: true },
+    }),
+    db.employee.findMany({ where: { companyId: run.companyId, payScheduleId: run.payScheduleId, status: { not: "TERMINATED" }, ssn: "" }, select: { firstName: true, lastName: true } }),
+  ]);
+  const last = new Map<string, number>();
+  for (const p of previous) if (!last.has(p.employeeId)) last.set(p.employeeId, p.grossCents);
+  const payday = iso(run.payday);
+  return runChecks({
+    today: iso(new Date()),
+    payday,
+    approveBy: approveBy(payday),
+    periodStart: iso(run.periodStart),
+    periodEnd: iso(run.periodEnd),
+    lines: run.lines.map((l) => ({
+      name: `${l.employee.firstName} ${l.employee.lastName}`,
+      payBasis: l.employee.payBasis,
+      hours: l.hours,
+      overtimeHours: l.overtimeHours,
+      defaultHours: l.employee.defaultHours,
+      bonusCents: l.bonusCents,
+      grossCents: l.grossCents,
+      netCents: l.netCents,
+      previousGrossCents: last.get(l.employeeId) ?? null,
+      paymentMethod: l.employee.paymentMethod,
+      bankLast4: l.employee.bankLast4,
+      i9Done: !!l.employee.i9CompletedAt,
+      hireDate: iso(l.employee.hireDate),
+      terminationDate: l.employee.terminationDate ? iso(l.employee.terminationDate) : null,
+    })),
+    waitingOnboarding: waiting.map((w) => `${w.firstName} ${w.lastName}`),
+  });
 }

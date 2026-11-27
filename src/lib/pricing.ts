@@ -2,13 +2,18 @@ import { dollars, type Cents } from "./money";
 
 /**
  * White Oak pricing: one flat monthly price that steps up for every 5 people on payroll that month
- * (employees and active contractors).
+ * (employees on payroll, and contractors in months they are paid).
  * No base fee, no per-employee fee. Add-on modules are flat monthly prices on the same bill.
+ * The first 5 people can be priced differently from each further 5 (firstTierPrice vs
+ * pricePerTier) so small companies cover their support cost without big ones overpaying.
  *
- * PLACEHOLDERS: tier and add-on prices are not final (see the product spec's open questions).
+ * PLACEHOLDERS: tier and add-on prices are not final (see the self-serve plan's unit economics).
  */
 export const PRICING = {
   employeesPerTier: 5,
+  /** Price for 1 to 5 people. */
+  firstTierPrice: dollars(25),
+  /** Price for each further 5 people. */
   pricePerTier: dollars(25),
   addOns: {
     time_tracking: { name: "Time Tracking", monthlyPrice: dollars(0) /* TBD */ },
@@ -24,6 +29,19 @@ export function tierFor(peoplePaid: number): number {
   return Math.ceil(peoplePaid / PRICING.employeesPerTier);
 }
 
+/** Base price for a tier (0 for nobody). */
+export function tierPrice(tier: number): Cents {
+  return tier === 0 ? 0 : PRICING.firstTierPrice + (tier - 1) * PRICING.pricePerTier;
+}
+
+/** The price rule in words, e.g. "$25 per 5 people" or "$35 for the first 5 people, then $20 per 5". */
+export function priceLabel(): string {
+  const f = (c: Cents) => `$${(c / 100).toFixed(c % 100 ? 2 : 0)}`;
+  return PRICING.firstTierPrice === PRICING.pricePerTier
+    ? `${f(PRICING.pricePerTier)} per ${PRICING.employeesPerTier} people`
+    : `${f(PRICING.firstTierPrice)} for the first ${PRICING.employeesPerTier} people, then ${f(PRICING.pricePerTier)} per ${PRICING.employeesPerTier}`;
+}
+
 export interface MonthlyBill {
   tier: number;
   tierRange: { from: number; to: number } | null;
@@ -35,7 +53,7 @@ export interface MonthlyBill {
 export function monthlyBill(peoplePaid: number, enabledAddOns: AddOnKey[] = []): MonthlyBill {
   const tier = tierFor(peoplePaid);
   const per = PRICING.employeesPerTier;
-  const basePrice = tier * PRICING.pricePerTier;
+  const basePrice = tierPrice(tier);
   const addOns = [...new Set(enabledAddOns)].map((key) => ({
     key,
     name: PRICING.addOns[key].name,

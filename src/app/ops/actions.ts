@@ -30,6 +30,7 @@ export async function addClientCompany(form: FormData) {
       city: str(form.get("city")),
       state,
       zip: str(form.get("zip")),
+      serviceMode: "MANAGED",
     },
   });
   await audit(user.id, c.id, "company.created_by_staff", { legalName, by: user.email });

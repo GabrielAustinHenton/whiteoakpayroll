@@ -95,6 +95,28 @@ the app shows the invite link on screen after you save, so you can send it yours
 
 Invite links work once and expire after 14 days. A pending invite can be resent from the employee's page.
 
+## Turning on the daily automation (draft pay runs and reminders)
+
+Once a day the app prepares each self-serve company's next pay run a week before payday and emails
+owners when a run needs approval, an I-9 is due, or a quarterly return is coming up. It never approves
+or pays anything by itself.
+
+1. In Vercel open **Settings → Environment Variables** and add `CRON_SECRET` with a long random value
+   (at least 16 characters; for example run `openssl rand -hex 24`).
+2. Redeploy. `vercel.json` already schedules `/api/cron/daily` for 12:00 UTC (7 AM Eastern); Vercel
+   sends the secret itself. On another host, call `GET /api/cron/daily` once a day with the header
+   `Authorization: Bearer <CRON_SECRET>`.
+
+Reminder emails need email turned on (above). Without `CRON_SECRET` the endpoint is off.
+
+## Self-serve and managed companies
+
+Each company is either **self-serve** (the owner runs payroll; employees use the portal) or **managed**
+(White Oak staff run it from the payroll desk). New signups are self-serve; companies staff create from
+the payroll desk, and every company that existed before this change, are managed. An admin can switch a
+company on its admin page. Per-company feature switches (employee portal, self-onboarding, advances,
+automatic draft runs, reminder emails) are in the company's settings.
+
 ## Moving off Vercel later
 
 The app is kept portable so it can move hosts without code changes:
