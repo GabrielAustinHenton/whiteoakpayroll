@@ -146,8 +146,10 @@ describe("tier pricing with a different first tier", () => {
       Object.assign(PRICING, saved);
     }
   });
-  it("keeps today's $25 per 5 people (6 people = $50)", () => {
+  it("charges $30 for the first 5 people and $20 per further 5 (6 people = $50)", () => {
+    expect(monthlyBill(5).total).toBe(3_000);
     expect(monthlyBill(6).total).toBe(5_000);
-    expect(priceLabel()).toBe("$25 per 5 people");
+    expect(monthlyBill(20).total).toBe(9_000);
+    expect(priceLabel()).toBe("$30 for the first 5 people, then $20 per 5");
   });
 });

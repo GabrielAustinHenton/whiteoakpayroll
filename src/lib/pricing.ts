@@ -7,14 +7,15 @@ import { dollars, type Cents } from "./money";
  * The first 5 people can be priced differently from each further 5 (firstTierPrice vs
  * pricePerTier) so small companies cover their support cost without big ones overpaying.
  *
- * PLACEHOLDERS: tier and add-on prices are not final (see the self-serve plan's unit economics).
+ * Tier prices set by Gabriel 2026-11-27: $30 for 1 to 5 people, then $20 for each further 5.
+ * Add-on prices are still placeholders.
  */
 export const PRICING = {
   employeesPerTier: 5,
   /** Price for 1 to 5 people. */
-  firstTierPrice: dollars(25),
+  firstTierPrice: dollars(30),
   /** Price for each further 5 people. */
-  pricePerTier: dollars(25),
+  pricePerTier: dollars(20),
   addOns: {
     time_tracking: { name: "Time Tracking", monthlyPrice: dollars(0) /* TBD */ },
     pto: { name: "PTO", monthlyPrice: dollars(0) /* TBD */ },
@@ -34,7 +35,7 @@ export function tierPrice(tier: number): Cents {
   return tier === 0 ? 0 : PRICING.firstTierPrice + (tier - 1) * PRICING.pricePerTier;
 }
 
-/** The price rule in words, e.g. "$25 per 5 people" or "$35 for the first 5 people, then $20 per 5". */
+/** The price rule in words, e.g. "$30 for the first 5 people, then $20 per 5". */
 export function priceLabel(): string {
   const f = (c: Cents) => `$${(c / 100).toFixed(c % 100 ? 2 : 0)}`;
   return PRICING.firstTierPrice === PRICING.pricePerTier
