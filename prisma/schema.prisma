@@ -127,6 +127,7 @@ model Company {
   invoices      Invoice[]
   auditLogs     AuditLog[]
   checks        Check[]
+  retirementPlans RetirementPlan[]
 }
 
 model StateAccount {
@@ -244,6 +245,7 @@ model Employee {
   createdAt        DateTime     @default(now())
   payRunLines      PayRunLine[]
   advances         Advance[]
+  retirementElections RetirementElection[]
 }
 
 model Contractor {
@@ -305,6 +307,7 @@ model PayRun {
   createdAt      DateTime     @default(now())
   lines          PayRunLine[]
   contractorPayments ContractorPayment[]
+  retirementSubmissions RetirementSubmission[]
 }
 
 model PayRunLine {
@@ -424,4 +427,86 @@ model Reminder {
   sentAt    DateTime @default(now())
 
   @@unique([companyId, key])
+}
+
+/**
+ * A retirement plan the company offers through a provider (Principal, Fidelity, OregonSaves...).
+ * Contributions are figured on every pay run; after payday White Oak builds the provider's file.
+ */
+model RetirementPlan {
+  id                String   @id @default(cuid())
+  companyId         String
+  company           Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /** Key from src/lib/retirement/providers.ts (principal, oregonsaves, ...). */
+  provider          String
+  /** 401K | SAFE_HARBOR_401K | SIMPLE_IRA | STATE_AUTO_IRA */
+  planType          String
+  name              String
+  /** Plan / contract number, or the state program's employer ID. */
+  planNumber        String?
+  /** SETUP (being entered) | ACTIVE (on pay runs) | PAUSED | ENDED */
+  status            String   @default("SETUP")
+  /** file_upload | sftp | api */
+  connectionMethod  String   @default("file_upload")
+  /** When the provider confirmed the connection (first file accepted, or partner credentials working). */
+  connectedAt       DateTime?
+  allowsRoth        Boolean  @default(false)
+  allowsCatchUp     Boolean  @default(true)
+  simpleApplicable  Boolean  @default(false)
+  /** Employer formula: { tiers: [{ rate, upTo }], nonelective }. */
+  employerFormula   Json     @default("{\"tiers\":[],\"nonelective\":0}")
+  employerPreset    String   @default("none")
+  autoEnrollRate    Float    @default(0)
+  eligibilityDays   Int      @default(0)
+  eligibilityMinAge Int      @default(18)
+  createdAt         DateTime @default(now())
+  elections         RetirementElection[]
+  submissions       RetirementSubmission[]
+
+  @@index([companyId])
+}
+
+/** What one employee chose for a plan (or the provider reported). */
+model RetirementElection {
+  id              String         @id @default(cuid())
+  planId          String
+  plan            RetirementPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  employeeId      String
+  employee        Employee       @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  /** ENROLLED | OPTED_OUT | NOT_ENROLLED */
+  status          String         @default("NOT_ENROLLED")
+  pretaxRate      Float          @default(0)
+  rothRate        Float          @default(0)
+  pretaxFlatCents Int            @default(0)
+  rothFlatCents   Int            @default(0)
+  /** employer | employee | provider_import | auto */
+  source          String         @default("employer")
+  /** The program already has this person (state programs need a roster row first). */
+  sentToProvider  Boolean        @default(false)
+  updatedAt       DateTime       @updatedAt
+
+  @@unique([planId, employeeId])
+}
+
+/** The provider file(s) for one paid pay run, and whether they were sent. */
+model RetirementSubmission {
+  id            String         @id @default(cuid())
+  planId        String
+  plan          RetirementPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  payRunId      String
+  payRun        PayRun         @relation(fields: [payRunId], references: [id], onDelete: Cascade)
+  /** READY (built, waiting to be uploaded) | SENT | CONFIRMED | FAILED */
+  status        String         @default("READY")
+  /** [{ fileName, content, rows, employeeCents, employerCents }] */
+  files         Json
+  employeeCents Int
+  employerCents Int
+  /** Date the money is due at the provider (deposit as soon as possible; DOL safe harbor 7 business days for small plans). */
+  dueOn         DateTime
+  sentAt        DateTime?
+  sentById      String?
+  note          String?
+  createdAt     DateTime       @default(now())
+
+  @@unique([planId, payRunId])
 }

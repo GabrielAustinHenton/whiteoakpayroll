@@ -11,6 +11,7 @@ const NAV: { area: Area; href: string; label: string }[] = [
   { area: "reports", href: "/payroll", label: "Pay runs" },
   { area: "reports", href: "/filings", label: "Tax filings" },
   { area: "advances", href: "/advances", label: "Advances" },
+  { area: "reports", href: "/retirement", label: "Retirement" },
   { area: "settings", href: "/setup", label: "Setup guide" },
   { area: "settings", href: "/settings", label: "Company settings" },
   { area: "team", href: "/team", label: "Team access" },
