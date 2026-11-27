@@ -11,10 +11,13 @@ const NAV: { area: Area; href: string; label: string }[] = [
   { area: "add_people", href: "/people", label: "People" },
   { area: "reports", href: "/payroll", label: "Pay runs" },
   { area: "reports", href: "/filings", label: "Tax filings" },
+  { area: "reports", href: "/reports", label: "Reports" },
   { area: "advances", href: "/advances", label: "Advances" },
+  { area: "settings", href: "/setup", label: "Setup guide" },
   { area: "settings", href: "/settings", label: "Company settings" },
   { area: "team", href: "/team", label: "Team access" },
   { area: "reports", href: "/billing", label: "Plan and billing" },
+  { area: "reports", href: "/activity", label: "Activity" },
 ];
 
 
@@ -26,6 +29,7 @@ export default async function CompanyLayout({ children, params }: { children: Re
   if (role === "EMPLOYEE") redirect("/me");
   const company = await db.company.findUnique({ where: { id: companyId } });
   if (!company) notFound();
+  const mode = company.serviceMode;
   const isAdmin = role === "PLATFORM_ADMIN";
   const editing = isAdmin && (await adminEditingCompany()) === companyId;
   if (isAdmin) await logAdminView(user.id, companyId);
@@ -62,7 +66,7 @@ export default async function CompanyLayout({ children, params }: { children: Re
           {role === "PAYROLL_OPERATOR" && <a href="/ops" className="small">← Payroll desk (all clients)</a>}
         </div>
         <div className="app-nav-links">
-          <NavLinks links={NAV.filter((n) => canUse(role, n.area)).map((n) => ({ href: `/app/${companyId}${n.href}`, label: n.label, exact: n.href === "" }))} />
+          <NavLinks links={NAV.filter((n) => canUse(role, n.area, mode) && !(n.href === "/activity" && role === "CLIENT_HR")).map((n) => ({ href: `/app/${companyId}${n.href}`, label: n.label, exact: n.href === "" }))} />
         </div>
       </nav>
       <section>{children}</section>

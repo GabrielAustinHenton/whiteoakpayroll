@@ -18,6 +18,8 @@ export default async function PayrollDesk({ searchParams }: { searchParams: Prom
   const { error, ok } = await messages(searchParams);
   const q = ((await searchParams).q ?? "").toString().trim().toLowerCase();
   const companies = await db.company.findMany({
+    // Self-serve companies run their own payroll; the desk lists the clients White Oak runs.
+    where: { serviceMode: "MANAGED" },
     orderBy: { legalName: "asc" },
     include: {
       paySchedules: { include: { payRuns: { where: { offCycle: false, status: { not: "VOIDED" } }, orderBy: { payday: "desc" }, take: 1 } } },
