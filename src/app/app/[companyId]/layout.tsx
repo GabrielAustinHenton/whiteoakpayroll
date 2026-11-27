@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { ROLE_LABEL, adminEditingCompany, canUse, requireUser, roleIn, type Area } from "@/lib/auth/session";
 import { logAdminView } from "@/lib/app/admin-view";
 import { startAdminEdit, stopAdminEdit } from "../../admin/actions";
+import { NavLinks } from "@/components/nav-links";
 
 const NAV: { area: Area; href: string; label: string }[] = [
   { area: "dashboard", href: "", label: "Overview" },
@@ -59,12 +60,14 @@ export default async function CompanyLayout({ children, params }: { children: Re
     )}
     <div className="app-shell">
       <nav className="app-nav" aria-label="Company">
-        <span className="company">{company.tradeName ?? company.legalName}</span>
-        <span className="small muted">{ROLE_LABEL[role]}</span>
-        {role === "PAYROLL_OPERATOR" && <a href="/ops" className="small">← Payroll desk (all clients)</a>}
-        {NAV.filter((n) => canUse(role, n.area, mode) && !(n.href === "/activity" && role === "CLIENT_HR")).map((n) => (
-          <a key={n.href} href={`/app/${companyId}${n.href}`}>{n.label}</a>
-        ))}
+        <div className="app-nav-head">
+          <span className="company">{company.tradeName ?? company.legalName}</span>
+          <span className="small muted">{ROLE_LABEL[role]}</span>
+          {role === "PAYROLL_OPERATOR" && <a href="/ops" className="small">← Payroll desk (all clients)</a>}
+        </div>
+        <div className="app-nav-links">
+          <NavLinks links={NAV.filter((n) => canUse(role, n.area, mode) && !(n.href === "/activity" && role === "CLIENT_HR")).map((n) => ({ href: `/app/${companyId}${n.href}`, label: n.label, exact: n.href === "" }))} />
+        </div>
       </nav>
       <section>{children}</section>
     </div>
