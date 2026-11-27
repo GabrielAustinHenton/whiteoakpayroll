@@ -1,3 +1,4 @@
+import { revealSsn } from "../security/field-crypto";
 import type { Prisma } from "@prisma/client";
 import { db } from "../db";
 import { computePaycheck, toPaycheckRecord, type LineDetail } from "./engine";
@@ -169,7 +170,7 @@ export async function filingInput(companyId: string): Promise<FilingInput> {
       uiIds: Object.fromEntries(c.stateAccounts.map((s) => [s.state, s.unemploymentAccount ?? ""])),
     },
     records,
-    employees: c.employees.map((e) => ({ id: e.id, name: `${e.firstName} ${e.lastName}`, ssn: e.ssn, address: { line1: e.addressLine1, city: e.city, state: e.state, zip: e.zip } })),
+    employees: c.employees.map((e) => ({ id: e.id, name: `${e.firstName} ${e.lastName}`, ssn: revealSsn(e), address: { line1: e.addressLine1, city: e.city, state: e.state, zip: e.zip } })),
     contractors: c.contractors.map((k) => ({
       id: k.id,
       name: k.businessName ? `${k.legalName} (${k.businessName})` : k.legalName,
