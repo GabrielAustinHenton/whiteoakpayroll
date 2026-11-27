@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
-import type { Role } from "@prisma/client";
+import type { Role, ServiceMode } from "@prisma/client";
 import { db } from "../db";
 import { adminAllowed, isStaffEmail } from "./admins";
 
@@ -54,8 +54,9 @@ export async function requireUser(): Promise<CurrentUser> {
 }
 
 /**
- * Areas of a company account. White Oak runs payroll for its clients as a service bureau: staff
- * (payroll operators) enter everything; client owners and HR see reports and add employees.
+ * Areas of a company account. In a MANAGED company White Oak runs payroll as a service bureau:
+ * staff (payroll operators) enter everything; client owners and HR see reports and add employees.
+ * In a SELF_SERVE company the owner does everything and HR manages people.
  *   reports     view pay runs, paystubs, checks, tax filings and the White Oak bill
  *   add_people  see the people list and add a new employee
  * The rest are data entry and payroll work, for White Oak staff.
@@ -66,11 +67,19 @@ export type Area = "dashboard" | "reports" | "add_people" | "people" | "payroll"
 export type AppRole = Role | "PAYROLL_OPERATOR";
 
 const ALL: Area[] = ["dashboard", "reports", "add_people", "people", "payroll", "filings", "settings", "billing", "team", "advances"];
-const AREAS: Record<Exclude<AppRole, "PLATFORM_ADMIN">, Area[]> = {
-  PAYROLL_OPERATOR: ALL,
-  CLIENT_OWNER: ["dashboard", "reports", "add_people"],
-  CLIENT_HR: ["dashboard", "reports", "add_people"],
-  EMPLOYEE: [],
+const AREAS: Record<ServiceMode, Record<Exclude<AppRole, "PLATFORM_ADMIN">, Area[]>> = {
+  MANAGED: {
+    PAYROLL_OPERATOR: ALL,
+    CLIENT_OWNER: ["dashboard", "reports", "add_people"],
+    CLIENT_HR: ["dashboard", "reports", "add_people"],
+    EMPLOYEE: [],
+  },
+  SELF_SERVE: {
+    PAYROLL_OPERATOR: ALL,
+    CLIENT_OWNER: ALL,
+    CLIENT_HR: ["dashboard", "reports", "add_people", "people"],
+    EMPLOYEE: [],
+  },
 };
 
 export const ROLE_LABEL: Record<AppRole, string> = {
@@ -93,10 +102,17 @@ export function roleIn(user: CurrentUser, companyId: string): AppRole | null {
   return m;
 }
 
-export function canUse(role: AppRole | null, area: Area): boolean {
+/** Whether a role may use an area. Without a mode, the stricter MANAGED rules apply. */
+export function canUse(role: AppRole | null, area: Area, mode: ServiceMode = "MANAGED"): boolean {
   if (!role) return false;
   if (role === "PLATFORM_ADMIN") return true;
-  return AREAS[role].includes(area);
+  return AREAS[mode][role].includes(area);
+}
+
+/** A company's service mode (MANAGED if the company is missing). */
+export async function companyMode(companyId: string): Promise<ServiceMode> {
+  const c = await db.company.findUnique({ where: { id: companyId }, select: { serviceMode: true } });
+  return c?.serviceMode ?? "MANAGED";
 }
 
 /** White Oak staff or admin: works across every client company. */
@@ -112,8 +128,9 @@ export async function requireStaff(): Promise<CurrentUser> {
 export async function requireArea(companyId: string, area: Area) {
   const user = await requireUser();
   const role = roleIn(user, companyId);
-  if (!canUse(role, area)) redirect(role ? `/app/${companyId}` : "/app");
-  return { user, role: role! };
+  const mode = await companyMode(companyId);
+  if (!canUse(role, area, mode)) redirect(role ? `/app/${companyId}` : "/app");
+  return { user, role: role!, mode };
 }
 
 const EDIT_COOKIE = "wo_admin_edit";

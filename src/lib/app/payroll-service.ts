@@ -1,6 +1,8 @@
 import type { Prisma } from "@prisma/client";
 import { db } from "../db";
 import { computePaycheck, toPaycheckRecord, type LineDetail } from "./engine";
+import { activePlan, buildRetirementSubmission, employeeRetirement, priorYearFicaWages } from "./retirement-service";
+import { totalEmployer } from "../retirement";
 import { nextPeriod, type Frequency } from "./periods";
 import { quarterForms, yearForms, type FilingInput } from "./filing-docs";
 import { renderFormPdf } from "../pdf/form-pdf";
@@ -18,7 +20,8 @@ export async function createPayRun(companyId: string, payScheduleId: string) {
   const schedule = await db.paySchedule.findFirstOrThrow({ where: { id: payScheduleId, companyId } });
   const last = await db.payRun.findFirst({ where: { payScheduleId, offCycle: false, status: { not: "VOIDED" } }, orderBy: { payday: "desc" } });
   const p = nextPeriod(schedule.frequency as Frequency, iso(schedule.anchorPayday), schedule.payLagDays, last ? iso(last.payday) : null);
-  const employees = await db.employee.findMany({ where: { companyId, payScheduleId, status: { in: ["ACTIVE", "ONBOARDING"] } } });
+  // Someone still filling in their own onboarding (no SSN yet) is left off until they finish.
+  const employees = await db.employee.findMany({ where: { companyId, payScheduleId, status: { in: ["ACTIVE", "ONBOARDING"] }, ssn: { not: "" } } });
   const run = await db.payRun.create({
     data: {
       companyId,
@@ -48,6 +51,8 @@ export async function recalculate(payRunId: string) {
   if (run.status !== "DRAFT") throw new Error("Only draft pay runs can change.");
   const year = run.payday.getUTCFullYear();
   const employerSize = await db.employee.count({ where: { companyId: run.companyId, status: "ACTIVE" } });
+  const plan = await activePlan(run.companyId);
+  const priorFica = plan ? await priorYearFicaWages(run.companyId, year) : new Map<string, number>();
 
   for (const line of run.lines) {
     const e = line.employee;
@@ -59,7 +64,8 @@ export async function recalculate(payRunId: string) {
       select: { detail: true },
     });
     const acct = run.company.stateAccounts.find((s) => s.state === e.workState);
-    const detail = computePaycheck(e, {
+    const detail = computePaycheck({ ...e, retirement: employeeRetirement(plan, e, priorFica) }, {
+      payday: iso(run.payday),
       frequency: run.paySchedule.frequency as Frequency,
       hours: line.hours,
       overtimeHours: line.overtimeHours,
@@ -90,13 +96,18 @@ export async function recalculate(payRunId: string) {
   const k = contractor._sum.amountCents ?? 0;
   const gross = lines.reduce((s, l) => s + l.grossCents, 0);
   const er = lines.reduce((s, l) => s + l.employerTaxesCents, 0);
+  // Employer 401(k)/SIMPLE money is on top of wages, so it is part of the cash the run needs.
+  const erRetirement = lines.reduce((s, l) => {
+    const d = l.detail as unknown as LineDetail | null;
+    return s + (d?.retirement ? totalEmployer(d.retirement) : 0);
+  }, 0);
   await db.payRun.update({
     where: { id: payRunId },
     data: {
       grossCents: gross,
       employerTaxesCents: er,
       netCents: lines.reduce((s, l) => s + l.netCents, 0),
-      cashNeededCents: gross + er + k,
+      cashNeededCents: gross + er + k + erRetirement,
     },
   });
 }
@@ -124,7 +135,8 @@ export async function approveAndPay(payRunId: string, actorId: string) {
     // Paper checks for anyone paid by check, numbered from the company's next check number.
     const toCheck = [
       ...run.lines
-        .filter((l) => l.employee.paymentMethod === "CHECK" && l.netCents > 0)
+        // No bank account on file means a paper check, whatever the payment method says.
+        .filter((l) => (l.employee.paymentMethod === "CHECK" || !l.employee.bankLast4) && l.netCents > 0)
         .map((l) => ({ payRunLineId: l.id, payee: `${l.employee.firstName} ${l.employee.lastName}`, amountCents: l.netCents })),
       ...run.contractorPayments
         .filter((p) => p.contractor.paymentMethod === "CHECK" && p.amountCents > 0)
@@ -137,6 +149,8 @@ export async function approveAndPay(payRunId: string, actorId: string) {
     });
   });
   await audit(actorId, run.companyId, "payrun.approved", { payRunId, cashNeededCents: run.cashNeededCents });
+  // Retirement provider file for this payday (built now, uploaded or sent from the Retirement page).
+  await buildRetirementSubmission(payRunId);
   await refreshInvoice(run.companyId, iso(run.payday).slice(0, 7));
 }
 
@@ -191,32 +205,39 @@ export async function generateFilings(companyId: string, period: string, actorId
 
 /**
  * People on the bill for a month: every employee on payroll at any point in the month (added to
- * White Oak by month end and not let go before it began) plus every active contractor, and anyone
- * paid that month. The count never drops within a month: adding a 6th person moves the month to the
- * next tier, and offboarding them that month does not move it back.
+ * White Oak by month end and not let go before it began), anyone paid that month, and contractors
+ * only in months they are paid. The count never drops within a month: adding a 6th person moves
+ * the month to the next tier, and offboarding them that month does not move it back.
  */
-async function monthBill(companyId: string, month: string) {
+export async function billPeople(companyId: string, month: string) {
   const [y, mo] = month.split("-").map(Number);
   const from = new Date(Date.UTC(y, mo - 1, 1));
   const to = new Date(Date.UTC(y, mo, 1));
-  const [employees, contractors, lines, pays, stored, modules] = await Promise.all([
-    db.employee.findMany({ where: { companyId, createdAt: { lt: to }, OR: [{ terminationDate: null }, { terminationDate: { gte: from } }] }, select: { id: true } }),
-    db.contractor.findMany({ where: { companyId, createdAt: { lt: to }, status: { not: "TERMINATED" } }, select: { id: true } }),
-    db.payRunLine.findMany({ where: { payRun: { companyId, payday: { gte: from, lt: to }, status: "PAID" }, grossCents: { gt: 0 } }, select: { employeeId: true } }),
+  const [employees, lines, pays] = await Promise.all([
+    db.employee.findMany({ where: { companyId, createdAt: { lt: to }, OR: [{ terminationDate: null }, { terminationDate: { gte: from } }] }, select: { id: true, firstName: true, lastName: true, terminationDate: true, createdAt: true } }),
+    db.payRunLine.findMany({ where: { payRun: { companyId, payday: { gte: from, lt: to }, status: "PAID" }, grossCents: { gt: 0 } }, select: { employeeId: true, employee: { select: { firstName: true, lastName: true } } } }),
     db.contractorPayment.findMany({
       where: { contractor: { companyId }, paidOn: { gte: from, lt: to }, OR: [{ payRunId: null }, { payRun: { status: "PAID" } }] },
-      select: { contractorId: true },
+      select: { contractorId: true, contractor: { select: { legalName: true, businessName: true } } },
     }),
+  ]);
+  const people = new Map<string, { name: string; kind: "employee" | "contractor"; why: string }>();
+  for (const e of employees) {
+    const why = e.terminationDate ? `on payroll until ${e.terminationDate.toISOString().slice(0, 10)}` : e.createdAt >= from ? `added ${e.createdAt.toISOString().slice(0, 10)}` : "on payroll";
+    people.set(`e:${e.id}`, { name: `${e.firstName} ${e.lastName}`, kind: "employee", why });
+  }
+  for (const l of lines) if (!people.has(`e:${l.employeeId}`)) people.set(`e:${l.employeeId}`, { name: `${l.employee.firstName} ${l.employee.lastName}`, kind: "employee", why: "paid this month" });
+  for (const p of pays) people.set(`c:${p.contractorId}`, { name: p.contractor.businessName ?? p.contractor.legalName, kind: "contractor", why: "paid this month" });
+  return [...people.values()].sort((x, y2) => x.name.localeCompare(y2.name));
+}
+
+async function monthBill(companyId: string, month: string) {
+  const [counted, stored, modules] = await Promise.all([
+    billPeople(companyId, month),
     db.invoice.findUnique({ where: { companyId_month: { companyId, month } } }),
     db.companyModule.findMany({ where: { companyId } }),
   ]);
-  const counted = new Set([
-    ...employees.map((e) => `e:${e.id}`),
-    ...lines.map((l) => `e:${l.employeeId}`),
-    ...contractors.map((k) => `c:${k.id}`),
-    ...pays.map((p) => `c:${p.contractorId}`),
-  ]).size;
-  const people = Math.max(counted, stored?.peoplePaid ?? 0);
+  const people = Math.max(counted.length, stored?.peoplePaid ?? 0);
   const addOns = modules.map((m) => (m.addOn === "PTO" ? "pto" : "time_tracking") as AddOnKey);
   return { people, bill: monthlyBill(people, addOns) };
 }

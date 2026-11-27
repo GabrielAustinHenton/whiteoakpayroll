@@ -5,8 +5,8 @@ import { setContractorStatus } from "../actions";
 
 export default async function People({ params, searchParams }: { params: Promise<{ companyId: string }>; searchParams: Promise<Record<string, string>> }) {
   const { companyId } = await params;
-  const { role } = await requireArea(companyId, "add_people");
-  const staff = canUse(role, "people");
+  const { role, mode } = await requireArea(companyId, "add_people");
+  const staff = canUse(role, "people", mode);
   const { error, ok } = await messages(searchParams);
   const employees = await db.employee.findMany({ where: { companyId }, orderBy: [{ status: "asc" }, { lastName: "asc" }] });
   const contractors = await db.contractor.findMany({ where: { companyId }, orderBy: { legalName: "asc" } });
@@ -29,7 +29,10 @@ export default async function People({ params, searchParams }: { params: Promise
               {employees.map((e) => (
                 <tr key={e.id}>
                   <td>{staff ? <a href={`${base}/${e.id}`}>{e.firstName} {e.lastName}</a> : `${e.firstName} ${e.lastName}`}</td>
-                  <td><span className={`badge ${e.status.toLowerCase()}`}>{e.status.toLowerCase()}</span></td>
+                  <td>
+                    <span className={`badge ${e.status.toLowerCase()}`}>{e.status.toLowerCase()}</span>
+                    {e.status === "ONBOARDING" && <span className="small muted"> {e.selfOnboardingInvitedAt && !e.selfOnboardingDoneAt ? "waiting on them" : !e.i9CompletedAt ? "I-9 Section 2 needed" : ""}</span>}
+                  </td>
                   <td>{e.workState}</td>
                   <td>{e.payBasis === "HOURLY" ? `${usd(e.payRateCents)}/hr` : `${usd(e.payRateCents)}/yr`}</td>
                   <td>{prettyDate(e.hireDate)}</td>
