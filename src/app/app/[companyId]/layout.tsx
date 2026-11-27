@@ -5,6 +5,7 @@ import { ROLE_LABEL, adminEditingCompany, canUse, requireUser, roleIn, type Area
 import { logAdminView } from "@/lib/app/admin-view";
 import { startAdminEdit, stopAdminEdit } from "../../admin/actions";
 import { NavLinks } from "@/components/nav-links";
+import { timeTrackingOn } from "@/lib/time/service";
 
 const NAV: { area: Area; href: string; label: string }[] = [
   { area: "dashboard", href: "", label: "Overview" },
@@ -34,6 +35,7 @@ export default async function CompanyLayout({ children, params }: { children: Re
   const isAdmin = role === "PLATFORM_ADMIN";
   const editing = isAdmin && (await adminEditingCompany()) === companyId;
   if (isAdmin) await logAdminView(user.id, companyId);
+  const timeOn = canUse(role, "reports", mode) && (await timeTrackingOn(companyId));
   return (
     <>
     {isAdmin && (
@@ -67,7 +69,7 @@ export default async function CompanyLayout({ children, params }: { children: Re
           {role === "PAYROLL_OPERATOR" && <a href="/ops" className="small">← Payroll desk (all clients)</a>}
         </div>
         <div className="app-nav-links">
-          <NavLinks links={NAV.filter((n) => canUse(role, n.area, mode) && !(n.href === "/activity" && role === "CLIENT_HR")).map((n) => ({ href: `/app/${companyId}${n.href}`, label: n.label, exact: n.href === "" }))} />
+          <NavLinks links={NAV.filter((n) => canUse(role, n.area, mode) && !(n.href === "/activity" && role === "CLIENT_HR")).map((n) => ({ href: `/app/${companyId}${n.href}`, label: n.label, exact: n.href === "" })).concat(timeOn ? [{ href: `/app/${companyId}/time`, label: "Time Tracking", exact: false }] : [])} />
         </div>
       </nav>
       <section>{children}</section>

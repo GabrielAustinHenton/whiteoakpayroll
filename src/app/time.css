@@ -1,0 +1,20 @@
+/* Time Tracking: employee clock (mobile first) and manager timecards. */
+.clock-page { max-width: 480px; margin: 0 auto; }
+.punch-card { border: 1px solid var(--line); border-radius: 14px; padding: 20px 16px; margin: 16px 0; text-align: center; background: var(--card); }
+.punch-card.state-in { border-top: 6px solid var(--accent); }
+.punch-card.state-break { border-top: 6px solid #b7791f; }
+.punch-status { font-size: 1.1rem; font-weight: 600; margin: 0; }
+.punch-clock { font-size: 2.6rem; font-weight: 700; margin: 4px 0 16px; font-variant-numeric: tabular-nums; }
+.punch-buttons { display: grid; gap: 12px; }
+.punch-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.punch-buttons button { padding: 14px; font-size: 1.05rem; border-radius: 10px; }
+.punch-big { font-size: 1.4rem !important; padding: 22px !important; }
+.punch-list { padding-left: 18px; }
+.punch-list li { margin: 6px 0; }
+.flag { display: inline-block; font-size: 0.72rem; padding: 1px 7px; border-radius: 999px; border: 1px solid #b7791f; color: #b7791f; margin: 2px 4px 2px 0; }
+.flag.serious { border-color: var(--danger); color: var(--danger); }
+.who-in { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.who-in .stat { padding: 10px 12px; }
+.punch-photo { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; vertical-align: middle; }
+.geo-map { height: 340px; border: 1px solid var(--line); border-radius: 10px; margin: 8px 0; }
+.time-tabs { display: flex; gap: 14px; flex-wrap: wrap; margin: 4px 0 16px; }

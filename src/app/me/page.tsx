@@ -5,6 +5,7 @@ import { canOfferAdvance } from "@/lib/payroll/advances";
 import type { LaunchState } from "@/lib/payroll/schedules";
 import { featuresFor } from "@/lib/app/features";
 import { requestAdvance } from "./actions";
+import { timeTrackingOn } from "@/lib/time/service";
 
 export default async function Me({ searchParams }: { searchParams: Promise<Record<string, string>> }) {
   const user = await requireUser();
@@ -26,10 +27,12 @@ export default async function Me({ searchParams }: { searchParams: Promise<Recor
   const f = featuresFor(e.company);
   const advancesOk = canOfferAdvance(e.workState as LaunchState);
   const company = e.company.tradeName ?? e.company.legalName;
+  const clockOn = e.status !== "TERMINATED" && (await timeTrackingOn(e.companyId));
   return (
     <>
       <h1>My pay · {company}</h1>
       <Notice error={error} ok={ok} />
+      {clockOn && <p><a href="/me/clock"><button type="button">Open time clock</button></a></p>}
       {f.employeePortal && !e.ssn && e.status !== "TERMINATED" && (
         <div className="card">
           <p><b>Finish your new-hire paperwork</b> so {company} can pay you: your details, W-4, state tax form and direct deposit.</p>
