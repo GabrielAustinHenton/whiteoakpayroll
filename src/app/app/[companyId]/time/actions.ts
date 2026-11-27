@@ -1,5 +1,6 @@
 "use server";
 
+import { randomInt } from "node:crypto";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { requireWrite } from "@/lib/auth/session";
@@ -7,6 +8,7 @@ import { audit, recalculate } from "@/lib/app/payroll-service";
 import { TIME_ZONES, localDate } from "@/lib/time/clock";
 import { fillPayRunFromTime, lockingTimesheet, middleMeal, periodSummary, shiftTimes } from "@/lib/time/timesheets";
 import { timeSettings } from "@/lib/time/service";
+import { issueSetupCode, pinProblem, setPin } from "@/lib/time/kiosk";
 import { str } from "@/components/ui";
 
 const go = (path: string, msg: { error?: string; ok?: string } = {}): never => {
@@ -230,4 +232,52 @@ export async function fillHoursFromTime(form: FormData) {
   await audit(user.id, companyId, "payrun.hours_from_time_tracking", { payRunId, filled: r.filled });
   const summary = [`Filled hours for ${r.filled} hourly employee${r.filled === 1 ? "" : "s"} from Time Tracking (overtime over 40 a week).`, ...r.lines].join("\n");
   redirect(`${here}?imported=${encodeURIComponent(summary.slice(0, 1800))}`);
+}
+
+/* ---------- Kiosks ---------- */
+
+export async function createKiosk(form: FormData) {
+  const companyId = str(form.get("companyId"));
+  const { user } = await requireWrite(companyId, "payroll");
+  const back = `/app/${companyId}/time/kiosks`;
+  const name = str(form.get("name")) || "Front desk tablet";
+  const locationId = str(form.get("locationId"));
+  const loc = locationId ? await db.workLocation.findFirst({ where: { id: locationId, companyId } }) : null;
+  const k = await db.kiosk.create({ data: { companyId, name, locationId: loc?.id ?? null, checkLocation: form.get("checkLocation") === "on" } });
+  const code = await issueSetupCode(k.id);
+  await audit(user.id, companyId, "time.kiosk_created", { kioskId: k.id, name });
+  redirect(`${back}?setup=${encodeURIComponent(code)}&kiosk=${k.id}`);
+}
+
+export async function newKioskLink(form: FormData) {
+  const companyId = str(form.get("companyId"));
+  const { user } = await requireWrite(companyId, "payroll");
+  const k = await db.kiosk.findFirstOrThrow({ where: { id: str(form.get("kioskId")), companyId } });
+  const code = await issueSetupCode(k.id);
+  await audit(user.id, companyId, "time.kiosk_link_issued", { kioskId: k.id });
+  redirect(`/app/${companyId}/time/kiosks?setup=${encodeURIComponent(code)}&kiosk=${k.id}`);
+}
+
+export async function revokeKiosk(form: FormData) {
+  const companyId = str(form.get("companyId"));
+  const { user } = await requireWrite(companyId, "payroll");
+  const k = await db.kiosk.findFirstOrThrow({ where: { id: str(form.get("kioskId")), companyId } });
+  await db.kiosk.update({ where: { id: k.id }, data: { revokedAt: new Date(), deviceTokenHash: null, setupCodeHash: null } });
+  await audit(user.id, companyId, "time.kiosk_revoked", { kioskId: k.id });
+  go(`/app/${companyId}/time/kiosks`, { ok: `${k.name} turned off. That tablet can't take punches any more.` });
+}
+
+/** Set an employee's kiosk PIN: the one typed, or a random one shown once. */
+export async function setEmployeePin(form: FormData) {
+  const companyId = str(form.get("companyId"));
+  const { user } = await requireWrite(companyId, "payroll");
+  const back = `/app/${companyId}/time/kiosks`;
+  const e = await db.employee.findFirstOrThrow({ where: { id: str(form.get("employeeId")), companyId } });
+  let pin = str(form.get("pin"));
+  if (!pin) do pin = String(randomInt(0, 10_000)).padStart(4, "0"); while (pinProblem(pin));
+  const problem = pinProblem(pin);
+  if (problem) go(back, { error: problem });
+  await setPin(e.id, pin);
+  await audit(user.id, companyId, "time.kiosk_pin_set", { employeeId: e.id });
+  go(back, { ok: `${e.firstName} ${e.lastName}'s kiosk PIN is ${pin}. Give it to them privately; it isn't shown again.` });
 }
