@@ -4,14 +4,15 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireArea } from "@/lib/auth/session";
-import { hashPassword, temporaryPassword } from "@/lib/auth/password";
+import { canUse, requireWrite, type AppRole } from "@/lib/auth/session";
+import { inviteTeammateLogin } from "@/lib/app/invites";
 import { normalizeEin, normalizeSsn } from "@/lib/app/ids";
 import { checkPayFrequency, type LaunchState } from "@/lib/payroll/schedules";
 import { canOfferAdvance } from "@/lib/payroll/advances";
 import { approveAndPay, audit, voidCheck, createPayRun, generateFilings, recalculate, refreshInvoice } from "@/lib/app/payroll-service";
 import { DEFAULT_HOURS, type Frequency } from "@/lib/app/periods";
-import { cents, str } from "@/components/ui";
+import { nameKey, readTimeExport } from "@/lib/app/time-import";
+import { cents, str, usd } from "@/components/ui";
 import { protectSsn } from "@/lib/security/field-crypto";
 import { i9Dates, sameForm, stateRecord, w4DependentsCents, w4Record, type W4Entry } from "@/lib/app/onboarding-records";
 import { rehireNeedsNewI9 } from "@/lib/onboarding";
@@ -23,12 +24,26 @@ const go = (path: string, msg: { error?: string; ok?: string } = {}): never => {
 const day = (s: string) => new Date(`${s}T00:00:00Z`);
 const id = (form: FormData) => str(form.get("companyId"));
 const LAUNCH = ["CT", "MA", "OR", "NY"];
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const thisMonth = () => new Date().toISOString().slice(0, 7);
+const companyName = async (companyId: string) => {
+  const c = await db.company.findUniqueOrThrow({ where: { id: companyId } });
+  return c.tradeName || c.legalName;
+};
+
+/** Headcount changed: update this month's bill and, for people who can see billing, say what it is now. */
+async function feeNote(companyId: string, role: AppRole) {
+  const bill = await refreshInvoice(companyId, thisMonth());
+  if (!canUse(role, "billing")) return "";
+  return ` White Oak fee this month: ${usd(bill.total)} (${bill.peopleCount} ${bill.peopleCount === 1 ? "person" : "people"}).`;
+}
+
 
 /* ---------- Company settings ---------- */
 
 export async function updateCompany(form: FormData) {
   const companyId = id(form);
-  const { user } = await requireArea(companyId, "settings");
+  const { user } = await requireWrite(companyId, "settings");
   const ein = normalizeEin(str(form.get("ein")));
   if (ein.error) go(`/app/${companyId}/settings`, { error: ein.error });
   await db.company.update({
@@ -50,7 +65,7 @@ export async function updateCompany(form: FormData) {
 
 export async function updateBank(form: FormData) {
   const companyId = id(form);
-  const { user } = await requireArea(companyId, "settings");
+  const { user } = await requireWrite(companyId, "settings");
   const routing = str(form.get("routing")).replace(/\D/g, "");
   const account = str(form.get("account")).replace(/\D/g, "");
   if (routing.length !== 9 || account.length < 4) go(`/app/${companyId}/settings`, { error: "Routing number is 9 digits; account number at least 4." });
@@ -62,7 +77,7 @@ export async function updateBank(form: FormData) {
 
 export async function upsertStateAccount(form: FormData) {
   const companyId = id(form);
-  const { user } = await requireArea(companyId, "settings");
+  const { user } = await requireWrite(companyId, "settings");
   const state = str(form.get("state"));
   if (!LAUNCH.includes(state)) go(`/app/${companyId}/settings`, { error: "Choose CT, MA, OR or NY." });
   const ratePct = Number(str(form.get("suiRatePct")));
@@ -82,7 +97,7 @@ export async function upsertStateAccount(form: FormData) {
 
 export async function createSchedule(form: FormData) {
   const companyId = id(form);
-  const { user } = await requireArea(companyId, "settings");
+  const { user } = await requireWrite(companyId, "settings");
   const frequency = str(form.get("frequency")) as Frequency;
   const anchor = str(form.get("anchorPayday"));
   if (!["WEEKLY", "BIWEEKLY", "SEMIMONTHLY", "MONTHLY"].includes(frequency) || !/^\d{4}-\d{2}-\d{2}$/.test(anchor))
@@ -159,11 +174,12 @@ function employeeFields(form: FormData) {
 
 async function validateEmployee(companyId: string, f: ReturnType<typeof employeeFields>, scheduleId: string, back: string) {
   if (!f.firstName || !f.lastName) go(back, { error: "First and last name are required." });
+  if (f.email && !EMAIL.test(f.email)) go(back, { error: "That email doesn't look right." });
   if (!LAUNCH.includes(f.workState)) go(back, { error: "Work state must be CT, MA, OR or NY." });
   if (Number.isNaN(f.birthDate.getTime()) || Number.isNaN(f.hireDate.getTime())) go(back, { error: "Enter the birth date and hire date." });
   if (f.payRateCents <= 0) go(back, { error: "Enter the pay rate." });
   const schedule = await db.paySchedule.findFirst({ where: { id: scheduleId, companyId } });
-  if (!schedule) go(back, { error: "Create a pay schedule first (Company settings)." });
+  if (!schedule) go(back, { error: "There is no pay schedule yet. White Oak sets it up in Company settings." });
   const acct = await db.stateAccount.findUnique({ where: { companyId_state: { companyId, state: f.workState } } });
   const freq = schedule!.frequency.toLowerCase() as "weekly";
   const check = checkPayFrequency(freq, {
@@ -214,7 +230,7 @@ async function saveOnboarding(employeeId: string, userId: string, form: FormData
 
 export async function createEmployee(form: FormData) {
   const companyId = id(form);
-  const { user } = await requireArea(companyId, "people");
+  const { user, role } = await requireWrite(companyId, "add_people");
   const back = `/app/${companyId}/people/new`;
   const ssn = normalizeSsn(str(form.get("ssn")));
   if (ssn.error) go(back, { error: ssn.error });
@@ -227,12 +243,15 @@ export async function createEmployee(form: FormData) {
   const i9Done = await saveOnboarding(e.id, user.id, form, f);
   await db.employee.update({ where: { id: e.id }, data: { i9CompletedAt: i9Done, status: statusFor(i9Done) } });
   await audit(user.id, companyId, "employee.created", { employeeId: e.id });
-  go(`/app/${companyId}/people/${e.id}`, { ok: `${f.firstName} added.` });
+  const fee = await feeNote(companyId, role);
+  // Clients add people; White Oak staff review and maintain the record afterwards.
+  if (canUse(role, "people")) go(`/app/${companyId}/people/${e.id}`, { ok: `${f.firstName} added.${fee}` });
+  go(`/app/${companyId}/people`, { ok: `${f.firstName} ${f.lastName} added. White Oak will review their W-4 and I-9 details before the next payroll.${fee}` });
 }
 
 export async function updateEmployee(form: FormData) {
   const companyId = id(form);
-  const { user } = await requireArea(companyId, "people");
+  const { user } = await requireWrite(companyId, "people");
   const employeeId = str(form.get("employeeId"));
   const back = `/app/${companyId}/people/${employeeId}`;
   const existing = await db.employee.findFirstOrThrow({ where: { id: employeeId, companyId } });
@@ -260,7 +279,7 @@ export async function updateEmployee(form: FormData) {
 
 export async function terminateEmployee(form: FormData) {
   const companyId = id(form);
-  const { user } = await requireArea(companyId, "people");
+  const { user, role } = await requireWrite(companyId, "people");
   const employeeId = str(form.get("employeeId"));
   const date = str(form.get("terminationDate"));
   await db.employee.update({
@@ -270,14 +289,15 @@ export async function terminateEmployee(form: FormData) {
   const i9 = await db.i9Record.findUnique({ where: { employeeId } });
   if (i9) await db.i9Record.update({ where: { employeeId }, data: { retainUntil: i9Dates(i9.firstDayOfEmployment, day(date)).retainUntil } });
   await audit(user.id, companyId, "employee.terminated", { employeeId, date });
+  const fee = await feeNote(companyId, role);
   go(`/app/${companyId}/people/${employeeId}`, {
-    ok: "Offboarded. Run their final pay on or before the state deadline (MA: same day if fired; CT: next business day if fired; OR: end of next business day; NY: next regular payday).",
+    ok: `Offboarded. Run their final pay on or before the state deadline (MA: same day if fired; CT: next business day if fired; OR: end of next business day; NY: next regular payday). They still count toward this month's fee and drop off next month.${fee}`,
   });
 }
 
 export async function rehireEmployee(form: FormData) {
   const companyId = id(form);
-  await requireArea(companyId, "people");
+  const { role } = await requireWrite(companyId, "people");
   const employeeId = str(form.get("employeeId"));
   const i9 = await db.i9Record.findUnique({ where: { employeeId } });
   const today = new Date();
@@ -285,35 +305,17 @@ export async function rehireEmployee(form: FormData) {
   await db.employee.update({ where: { id: employeeId, companyId }, data: { status: "ONBOARDING", terminationDate: null, terminationReason: null, i9CompletedAt: null } });
   // Within 3 years the original I-9 is kept and updated with Supplement B; otherwise a new I-9 starts.
   if (i9) await db.i9Record.update({ where: { employeeId }, data: fresh ? { ...i9Dates(today), section1CompletedAt: null, section2CompletedAt: null, section2ById: null } : { retainUntil: null, section2CompletedAt: null } });
+  const fee = await feeNote(companyId, role);
   go(`/app/${companyId}/people/${employeeId}`, {
-    ok: fresh
+    ok: (fresh
       ? "Rehired. Their I-9 is more than 3 years old, so complete a new Form I-9."
-      : "Rehired. Their I-9 is less than 3 years old: complete Supplement B (rehire) on the original I-9 and mark Section 2 done.",
+      : "Rehired. Their I-9 is less than 3 years old: complete Supplement B (rehire) on the original I-9 and mark Section 2 done.") + fee,
   });
-}
-
-/** Give an employee a portal login. The temporary password is shown once to the person inviting. */
-export async function inviteEmployee(form: FormData) {
-  const companyId = id(form);
-  const { user } = await requireArea(companyId, "people");
-  const employeeId = str(form.get("employeeId"));
-  const e = await db.employee.findFirstOrThrow({ where: { id: employeeId, companyId } });
-  const requested = str(form.get("back"));
-  const back = requested.startsWith(`/app/${companyId}/`) ? requested : `/app/${companyId}/people/${employeeId}`;
-  if (e.userId) go(back, { error: "They already have a login." });
-  if (!e.email) go(back, { error: "Add their email first." });
-  const pw = temporaryPassword();
-  let u = await db.user.findUnique({ where: { email: e.email } });
-  if (u) go(back, { error: "That email already has a White Oak login; use a different email for the employee portal." });
-  u = await db.user.create({ data: { email: e.email, name: `${e.firstName} ${e.lastName}`, passwordHash: hashPassword(pw), memberships: { create: { companyId, role: "EMPLOYEE" } } } });
-  await db.employee.update({ where: { id: employeeId }, data: { userId: u.id } });
-  await audit(user.id, companyId, "employee.invited", { employeeId });
-  go(back, { ok: `Portal login created for ${e.firstName}: they sign in at whiteoakpayroll.com/login with ${e.email} and temporary password ${pw} (shown once; they can change it under Account).` });
 }
 
 export async function createContractor(form: FormData) {
   const companyId = id(form);
-  const { user } = await requireArea(companyId, "people");
+  const { user, role } = await requireWrite(companyId, "people");
   const back = `/app/${companyId}/people/contractors/new`;
   const tinType = str(form.get("tinType")) === "ein" ? "ein" : "ssn";
   const tin = tinType === "ein" ? normalizeEin(str(form.get("tin"))) : normalizeSsn(str(form.get("tin")));
@@ -338,22 +340,23 @@ export async function createContractor(form: FormData) {
     },
   });
   await audit(user.id, companyId, "contractor.created", { contractorId: k.id });
-  go(`/app/${companyId}/people`, { ok: `${legalName} added as a contractor.` });
+  go(`/app/${companyId}/people`, { ok: `${legalName} added as a contractor.${await feeNote(companyId, role)}` });
 }
 
 export async function setContractorStatus(form: FormData) {
   const companyId = id(form);
-  await requireArea(companyId, "people");
+  const { role } = await requireWrite(companyId, "people");
   const status = str(form.get("status")) === "TERMINATED" ? "TERMINATED" : "ACTIVE";
   await db.contractor.update({ where: { id: str(form.get("contractorId")), companyId }, data: { status } });
-  go(`/app/${companyId}/people`, { ok: status === "TERMINATED" ? "Contractor ended." : "Contractor reactivated." });
+  const fee = await feeNote(companyId, role);
+  go(`/app/${companyId}/people`, { ok: (status === "TERMINATED" ? "Contractor ended. They still count toward this month's fee and drop off next month." : "Contractor reactivated.") + fee });
 }
 
 /* ---------- Pay runs ---------- */
 
 export async function startPayRun(form: FormData) {
   const companyId = id(form);
-  await requireArea(companyId, "payroll");
+  await requireWrite(companyId, "payroll");
   const c = await db.company.findUniqueOrThrow({ where: { id: companyId }, include: { stateAccounts: true } });
   if (!c.bankLast4) go(`/app/${companyId}/payroll`, { error: "Add the funding bank account in Company settings first." });
   const states = await db.employee.findMany({ where: { companyId, status: { not: "TERMINATED" } }, distinct: ["workState"], select: { workState: true } });
@@ -365,7 +368,7 @@ export async function startPayRun(form: FormData) {
 
 export async function saveRunInputs(form: FormData) {
   const companyId = id(form);
-  await requireArea(companyId, "payroll");
+  await requireWrite(companyId, "payroll");
   const payRunId = str(form.get("payRunId"));
   const run = await db.payRun.findFirstOrThrow({ where: { id: payRunId, companyId }, include: { lines: true } });
   if (run.status !== "DRAFT") go(`/app/${companyId}/payroll/${payRunId}`, { error: "This pay run is already approved." });
@@ -378,7 +381,11 @@ export async function saveRunInputs(form: FormData) {
     }
     await db.payRunLine.update({
       where: { id: l.id },
-      data: { hours: hours === null ? l.hours : Number(hours) || 0, bonusCents: cents(form.get(`bonus_${l.id}`)) },
+      data: {
+        hours: hours === null ? l.hours : Math.max(0, Number(hours) || 0),
+        overtimeHours: form.get(`ot_${l.id}`) === null ? l.overtimeHours : Math.max(0, Number(form.get(`ot_${l.id}`)) || 0),
+        bonusCents: cents(form.get(`bonus_${l.id}`)),
+      },
     });
   }
   const contractorId = str(form.get("contractorId"));
@@ -390,9 +397,56 @@ export async function saveRunInputs(form: FormData) {
   go(`/app/${companyId}/payroll/${payRunId}`, { ok: "Recalculated." });
 }
 
+/**
+ * Fill a draft pay run's hours from a time clock export (BuddyPunch CSV). Hourly employees are
+ * matched by name; anyone not in the file keeps the hours already in the grid. The result is a
+ * summary shown above the grid so the hours can be checked before approving.
+ */
+export async function importHours(form: FormData) {
+  const companyId = id(form);
+  const { user } = await requireWrite(companyId, "payroll");
+  const payRunId = str(form.get("payRunId"));
+  const here = `/app/${companyId}/payroll/${payRunId}`;
+  const run = await db.payRun.findFirstOrThrow({ where: { id: payRunId, companyId }, include: { lines: { include: { employee: true } } } });
+  if (run.status !== "DRAFT") go(here, { error: "This pay run is already approved." });
+  const file = form.get("file");
+  if (!(file instanceof File) || file.size === 0) go(here, { error: "Choose the CSV file to import." });
+  if ((file as File).size > 2_000_000) go(here, { error: "That file is too large for an hours export (2 MB limit)." });
+  const name = (file as File).name.toLowerCase();
+  if (name.endsWith(".xlsx") || name.endsWith(".xls")) go(here, { error: "That is an Excel file. In BuddyPunch choose CSV when you download the report, or in Excel use File > Save As > CSV." });
+  const { people, warnings } = readTimeExport(await (file as File).text());
+  if (people.length === 0) go(here, { error: warnings[0] ?? "No hours found in that file." });
+
+  const byKey = new Map(people.map((p) => [nameKey(p.name), p]));
+  const lines: string[] = [];
+  const used = new Set<string>();
+  let filled = 0;
+  for (const l of run.lines) {
+    const e = l.employee;
+    const p = byKey.get(nameKey(`${e.firstName} ${e.lastName}`));
+    if (!p) {
+      if (e.payBasis === "HOURLY") lines.push(`Not in file, left as is: ${e.firstName} ${e.lastName} (${l.hours ?? 0} h)`);
+      continue;
+    }
+    used.add(nameKey(p.name));
+    if (e.payBasis !== "HOURLY") {
+      lines.push(`Salaried, hours not used: ${e.firstName} ${e.lastName} (${p.regular + p.overtime} h in file)`);
+      continue;
+    }
+    await db.payRunLine.update({ where: { id: l.id }, data: { hours: p.regular, overtimeHours: p.overtime } });
+    filled++;
+    if (p.regular + p.overtime > 100) lines.push(`Check: ${e.firstName} ${e.lastName} has ${p.regular + p.overtime} hours.`);
+  }
+  for (const p of people) if (!used.has(nameKey(p.name))) lines.push(`In file but not on this pay run: ${p.name} (${p.regular} h${p.overtime ? ` + ${p.overtime} OT` : ""}). Add them in People, or check the spelling.`);
+  await recalculate(payRunId);
+  await audit(user.id, companyId, "payrun.hours_imported", { payRunId, file: (file as File).name, filled, people: people.length });
+  const summary = [`Filled hours for ${filled} of ${run.lines.filter((l) => l.employee.payBasis === "HOURLY").length} hourly employees from ${(file as File).name}.`, ...warnings, ...lines].join("\n");
+  redirect(`${here}?imported=${encodeURIComponent(summary.slice(0, 1800))}`);
+}
+
 export async function removeContractorPayment(form: FormData) {
   const companyId = id(form);
-  await requireArea(companyId, "payroll");
+  await requireWrite(companyId, "payroll");
   const payRunId = str(form.get("payRunId"));
   await db.contractorPayment.deleteMany({ where: { id: str(form.get("paymentId")), payRunId, payRun: { status: "DRAFT", companyId } } });
   await recalculate(payRunId);
@@ -401,7 +455,7 @@ export async function removeContractorPayment(form: FormData) {
 
 export async function approveRun(form: FormData) {
   const companyId = id(form);
-  const { user } = await requireArea(companyId, "payroll");
+  const { user } = await requireWrite(companyId, "payroll");
   const payRunId = str(form.get("payRunId"));
   if (form.get("confirm") !== "on") go(`/app/${companyId}/payroll/${payRunId}`, { error: "Tick the box to confirm the totals." });
   await db.payRun.findFirstOrThrow({ where: { id: payRunId, companyId } });
@@ -415,7 +469,7 @@ export async function approveRun(form: FormData) {
 
 export async function voidOrReissueCheck(form: FormData) {
   const companyId = id(form);
-  const { user } = await requireArea(companyId, "payroll");
+  const { user } = await requireWrite(companyId, "payroll");
   const payRunId = str(form.get("payRunId"));
   const reissue = str(form.get("mode")) === "reissue";
   try {
@@ -429,7 +483,7 @@ export async function voidOrReissueCheck(form: FormData) {
 
 export async function setNextCheckNumber(form: FormData) {
   const companyId = id(form);
-  await requireArea(companyId, "settings");
+  await requireWrite(companyId, "settings");
   const n = Number(str(form.get("nextCheckNumber")));
   if (!Number.isInteger(n) || n < 1) go(`/app/${companyId}/settings`, { error: "Check number must be a whole number." });
   const used = await db.check.findFirst({ where: { companyId, number: { gte: n } } });
@@ -440,7 +494,7 @@ export async function setNextCheckNumber(form: FormData) {
 
 export async function deleteDraftRun(form: FormData) {
   const companyId = id(form);
-  await requireArea(companyId, "payroll");
+  await requireWrite(companyId, "payroll");
   await db.payRun.deleteMany({ where: { id: str(form.get("payRunId")), companyId, status: "DRAFT" } });
   go(`/app/${companyId}/payroll`, { ok: "Draft deleted." });
 }
@@ -449,7 +503,7 @@ export async function deleteDraftRun(form: FormData) {
 
 export async function generate(form: FormData) {
   const companyId = id(form);
-  const { user } = await requireArea(companyId, "filings");
+  const { user } = await requireWrite(companyId, "filings");
   const period = str(form.get("period"));
   try {
     const count = await generateFilings(companyId, period, user.id);
@@ -462,7 +516,7 @@ export async function generate(form: FormData) {
 
 export async function markFiled(form: FormData) {
   const companyId = id(form);
-  const { user } = await requireArea(companyId, "filings");
+  const { user } = await requireWrite(companyId, "filings");
   await db.filing.update({ where: { id: str(form.get("filingId")), companyId }, data: { status: "filed", filedAt: new Date() } });
   await audit(user.id, companyId, "filing.marked_filed", { filingId: str(form.get("filingId")) });
   revalidatePath(`/app/${companyId}/filings`);
@@ -470,9 +524,34 @@ export async function markFiled(form: FormData) {
 
 /* ---------- Advances ---------- */
 
+/**
+ * White Oak staff record an advance the employee asked for (on paper, by phone or email). The
+ * employee signs the written repayment authorization; staff type the name as signed and the date.
+ */
+export async function recordAdvance(form: FormData) {
+  const companyId = id(form);
+  const { user } = await requireWrite(companyId, "advances");
+  const back = `/app/${companyId}/advances`;
+  const e = await db.employee.findFirst({ where: { id: str(form.get("employeeId")), companyId } });
+  if (!e || e.status !== "ACTIVE") go(back, { error: "Only active employees (I-9 complete) can get an advance." });
+  if (!canOfferAdvance(e!.workState as LaunchState)) go(back, { error: `Advances are not available for ${e!.workState} employees yet (Connecticut only until counsel signs off).` });
+  const amount = cents(form.get("amount"));
+  const installment = cents(form.get("installment"));
+  const signed = str(form.get("signedName"));
+  const signedOn = day(str(form.get("signedOn")));
+  if (amount <= 0 || amount > 100_000) go(back, { error: "Enter an advance between $1 and $1,000." });
+  if (installment <= 0 || installment > amount) go(back, { error: "The repayment per pay run must be more than $0 and no more than the advance." });
+  if (!signed || Number.isNaN(signedOn.getTime())) go(back, { error: "Enter the name as signed on the repayment authorization, and the date signed." });
+  const open = await db.advance.count({ where: { employeeId: e!.id, status: { in: ["REQUESTED", "ACTIVE"] } } });
+  if (open) go(back, { error: `${e!.firstName} already has an advance open.` });
+  await db.advance.create({ data: { employeeId: e!.id, principalCents: amount, installmentCents: installment, authorizationSignedName: signed, authorizationSignedAt: signedOn } });
+  await audit(user.id, companyId, "advance.recorded", { employeeId: e!.id, amount });
+  go(back, { ok: `Advance request recorded for ${e!.firstName}. Approve it below to pay it.` });
+}
+
 export async function decideAdvance(form: FormData) {
   const companyId = id(form);
-  const { user } = await requireArea(companyId, "advances");
+  const { user } = await requireWrite(companyId, "advances");
   const advanceId = str(form.get("advanceId"));
   const approve = str(form.get("decision")) === "approve";
   const a = await db.advance.findFirstOrThrow({ where: { id: advanceId, employee: { companyId } }, include: { employee: true } });
@@ -487,13 +566,13 @@ export async function decideAdvance(form: FormData) {
 
 export async function toggleAddOn(form: FormData) {
   const companyId = id(form);
-  const { user } = await requireArea(companyId, "billing");
+  const { user } = await requireWrite(companyId, "billing");
   const addOn = str(form.get("addOn")) === "PTO" ? "PTO" : "TIME_TRACKING";
   const existing = await db.companyModule.findUnique({ where: { companyId_addOn: { companyId, addOn } } });
   if (existing) await db.companyModule.delete({ where: { id: existing.id } });
   else await db.companyModule.create({ data: { companyId, addOn } });
   await audit(user.id, companyId, existing ? "addon.disabled" : "addon.enabled", { addOn });
-  await refreshInvoice(companyId, new Date().toISOString().slice(0, 7));
+  await refreshInvoice(companyId, thisMonth());
   go(`/app/${companyId}/billing`, { ok: existing ? "Add-on turned off." : "Add-on turned on." });
 }
 
@@ -501,25 +580,19 @@ export async function toggleAddOn(form: FormData) {
 
 export async function inviteTeammate(form: FormData) {
   const companyId = id(form);
-  const { user } = await requireArea(companyId, "team");
+  const { user } = await requireWrite(companyId, "team");
   const back = `/app/${companyId}/team`;
   const email = str(form.get("email")).toLowerCase();
   const role = str(form.get("role")) === "CLIENT_OWNER" ? "CLIENT_OWNER" : "CLIENT_HR";
-  if (!email) go(back, { error: "Enter an email." });
-  let u = await db.user.findUnique({ where: { email } });
-  let pw: string | null = null;
-  if (!u) {
-    pw = temporaryPassword();
-    u = await db.user.create({ data: { email, name: str(form.get("name")) || email, passwordHash: hashPassword(pw) } });
-  }
-  await db.membership.upsert({ where: { userId_companyId: { userId: u.id, companyId } }, create: { userId: u.id, companyId, role }, update: { role } });
+  if (!EMAIL.test(email)) go(back, { error: "Enter an email." });
+  const r = await inviteTeammateLogin(email, str(form.get("name")), companyId, role, await companyName(companyId));
   await audit(user.id, companyId, "team.invited", { email, role });
-  go(back, { ok: pw ? `Added ${email}. Temporary password: ${pw} (shown once).` : `Added ${email}; they sign in with their existing password.` });
+  go(back, { ok: `Added ${email}. ${r.message}` });
 }
 
 export async function removeTeammate(form: FormData) {
   const companyId = id(form);
-  const { user } = await requireArea(companyId, "team");
+  const { user } = await requireWrite(companyId, "team");
   const membershipId = str(form.get("membershipId"));
   const m = await db.membership.findFirstOrThrow({ where: { id: membershipId, companyId } });
   if (m.userId === user.id) go(`/app/${companyId}/team`, { error: "You can't remove yourself." });

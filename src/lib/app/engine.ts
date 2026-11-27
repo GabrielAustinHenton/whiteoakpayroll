@@ -124,6 +124,11 @@ export function employeeStateCertificate(e: EmployeeTaxProfile): StateCertificat
   }
 }
 
+/** Overtime pay: hours x 1.5 x the hourly rate. Salaried employees get none here. */
+export function overtimeWages(e: Pick<EmployeeTaxProfile, "payBasis" | "payRateCents">, hours: number): Cents {
+  return e.payBasis === "HOURLY" && hours > 0 ? Math.round(e.payRateCents * 1.5 * hours) : 0;
+}
+
 /** Regular wages for the period: hours x rate, or annual salary / periods per year. */
 export function regularWages(e: Pick<EmployeeTaxProfile, "payBasis" | "payRateCents">, freq: Frequency, hours: number | null): Cents {
   if (e.payBasis === "HOURLY") return Math.round(e.payRateCents * (hours ?? 0));
@@ -158,6 +163,8 @@ const MIN_WAGE_2026: Record<string, Cents> = { CT: 1694, MA: 1500, OR: 1505, NY:
 export interface PaycheckContext {
   frequency: Frequency;
   hours: number | null;
+  /** Overtime hours at 1.5x (hourly only). */
+  overtimeHours?: number;
   bonus: Cents;
   company: CompanyStateSettings;
   employerSize: number;
@@ -167,7 +174,7 @@ export interface PaycheckContext {
 
 /** Compute one paycheck, including retirement, health and advance repayment deductions. */
 export function computePaycheck(e: EmployeeTaxProfile, ctx: PaycheckContext): LineDetail {
-  const regular = regularWages(e, ctx.frequency, ctx.hours);
+  const regular = regularWages(e, ctx.frequency, ctx.hours) + overtimeWages(e, ctx.overtimeHours ?? 0);
   const gross = regular + ctx.bonus;
   const deductions: Deduction[] = [];
   if (e.retirementPretaxRate > 0) deductions.push({ kind: "retirement_pretax", amount: Math.round(gross * e.retirementPretaxRate) });
@@ -196,7 +203,7 @@ export function computePaycheck(e: EmployeeTaxProfile, ctx: PaycheckContext): Li
   // Advance repayment comes last: it is taken from net pay and never below the minimum wage floor.
   const advanceRepayments: { advanceId: string; amount: Cents }[] = [];
   let net = result.net;
-  const floor = Math.round((ctx.hours ?? 0) * (MIN_WAGE_2026[e.workState] ?? 0));
+  const floor = Math.round(((ctx.hours ?? 0) + (ctx.overtimeHours ?? 0)) * (MIN_WAGE_2026[e.workState] ?? 0));
   for (const a of ctx.advances) {
     const amount = advanceDeduction({
       advance: { principal: a.principalCents, installment: a.installmentCents, repaid: a.repaidCents, authorizationOnFile: a.authorizationSigned },

@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 export default async function AppIndex() {
   const user = await requireUser();
   const ids = user.memberships.filter((m) => m.role !== "EMPLOYEE").map((m) => m.companyId);
+  if (user.isStaff && ids.length === 0) redirect("/ops");
   if (user.isPlatformAdmin && ids.length === 0) redirect("/admin");
   if (ids.length === 0) redirect("/me");
   if (ids.length === 1) redirect(`/app/${ids[0]}`);

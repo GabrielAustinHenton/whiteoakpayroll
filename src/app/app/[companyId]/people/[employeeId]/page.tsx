@@ -5,7 +5,7 @@ import { Field, Notice, dateStr, messages, prettyDate } from "@/components/ui";
 import { EmployeeForm } from "../employee-form";
 import { onboardingTasks, stateCertificateDuties } from "@/lib/onboarding";
 import type { LaunchState } from "@/lib/tax-engine/state";
-import { inviteEmployee, rehireEmployee, terminateEmployee, updateEmployee } from "../../actions";
+import { rehireEmployee, terminateEmployee, updateEmployee } from "../../actions";
 
 export default async function EmployeePage({ params, searchParams }: { params: Promise<{ companyId: string; employeeId: string }>; searchParams: Promise<Record<string, string>> }) {
   const { companyId, employeeId } = await params;
@@ -41,12 +41,6 @@ export default async function EmployeePage({ params, searchParams }: { params: P
     <>
       <h1>{e.firstName} {e.lastName} <span className={`badge ${e.status.toLowerCase()}`}>{e.status.toLowerCase()}</span></h1>
       <Notice error={error} ok={ok} />
-      <div className="card">
-        <p><b>Employee portal:</b> {e.userId ? `has a login (${e.email})` : "no login yet"}</p>
-        {!e.userId && (
-          <form action={inviteEmployee}>{hidden}<button type="submit" className="secondary">Create portal login</button></form>
-        )}
-      </div>
       {e.status === "TERMINATED" ? (
         <div className="card">
           <p>Offboarded {prettyDate(e.terminationDate)}{e.terminationReason ? ` (${e.terminationReason})` : ""}.</p>

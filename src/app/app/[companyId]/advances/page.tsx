@@ -1,48 +1,46 @@
 import { db } from "@/lib/db";
+import { ADVANCE_ENABLED_STATES } from "@/lib/payroll/advances";
 import { requireArea } from "@/lib/auth/session";
-import { Notice, messages, prettyDate, usd } from "@/components/ui";
-import { decideAdvance, inviteEmployee } from "../actions";
+import { Field, Notice, messages, prettyDate, usd } from "@/components/ui";
+import { decideAdvance, recordAdvance } from "../actions";
 
 export default async function Advances({ params, searchParams }: { params: Promise<{ companyId: string }>; searchParams: Promise<Record<string, string>> }) {
   const { companyId } = await params;
   await requireArea(companyId, "advances");
   const { error, ok } = await messages(searchParams);
-  const employees = await db.employee.findMany({ where: { companyId, status: { not: "TERMINATED" } }, orderBy: { lastName: "asc" } });
+  const eligible = await db.employee.findMany({ where: { companyId, status: "ACTIVE", workState: { in: [...ADVANCE_ENABLED_STATES] } }, orderBy: { lastName: "asc" } });
   const advances = await db.advance.findMany({ where: { employee: { companyId } }, include: { employee: true }, orderBy: { requestedAt: "desc" } });
   return (
     <>
       <h1>Payday advances</h1>
-      <p className="muted">Employees request advances in their portal. They are interest-free and repaid by a fixed deduction on each pay run, never taking pay below minimum wage. Connecticut employees only for now.</p>
+      <p className="muted">Interest-free advances on pay, repaid by a fixed deduction on each pay run that never takes pay below minimum wage. Connecticut employees only for now.</p>
       <Notice error={error} ok={ok} />
       <div className="card">
-        <p><b>How an employee requests an advance</b></p>
-        <ol className="small">
-          <li>Invite them to the employee portal (button below, or on People). You get a temporary password to give them.</li>
-          <li>They sign in at whiteoakpayroll.com/login and open <b>My pay</b>.</li>
-          <li>Under <b>Payday advance</b> they enter the amount, how much to repay each pay run, and type their name to sign the repayment authorization.</li>
-          <li>The request shows up here for you to approve or decline. Approved advances are repaid automatically on each pay run.</li>
-        </ol>
-        <p className="small muted">They must be Active (I-9 complete) and work in Connecticut. Other states stay off until counsel signs off.</p>
-        <table>
-          <tbody>
-            {employees.map((e) => (
-              <tr key={e.id}>
-                <td>{e.firstName} {e.lastName}</td>
-                <td className="small">{e.workState}{e.workState === "CT" ? "" : " (advances not available)"}{e.status !== "ACTIVE" ? " · onboarding" : ""}</td>
-                <td>
-                  {e.userId ? <span className="small muted">Has portal login</span> : (
-                    <form action={inviteEmployee} className="inline">
-                      <input type="hidden" name="companyId" value={companyId} />
-                      <input type="hidden" name="employeeId" value={e.id} />
-                      <input type="hidden" name="back" value={`/app/${companyId}/advances`} />
-                      <button type="submit" className="link small">Invite to portal</button>
-                    </form>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <p><b>Record an advance request</b></p>
+        <p className="small muted">
+          The employee asks through their employer and signs the written repayment authorization (keep the signed copy). Enter it here, then approve it below.
+          Only active Connecticut employees are listed.
+        </p>
+        {eligible.length === 0 ? <p className="small">No active Connecticut employees.</p> : (
+          <form action={recordAdvance} className="form">
+            <input type="hidden" name="companyId" value={companyId} />
+            <div className="row">
+              <Field label="Employee">
+                <select name="employeeId" required defaultValue="">
+                  <option value="" disabled>Choose</option>
+                  {eligible.map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName}</option>)}
+                </select>
+              </Field>
+              <Field label="Advance ($)" hint="Up to $1,000"><input name="amount" inputMode="decimal" required /></Field>
+              <Field label="Repay per pay run ($)"><input name="installment" inputMode="decimal" required /></Field>
+            </div>
+            <div className="row">
+              <Field label="Name as signed on the authorization"><input name="signedName" required /></Field>
+              <Field label="Date signed"><input name="signedOn" type="date" required /></Field>
+            </div>
+            <button type="submit">Record request</button>
+          </form>
+        )}
       </div>
       <h2>Requests</h2>
       {advances.length === 0 ? <p className="muted">No requests.</p> : (

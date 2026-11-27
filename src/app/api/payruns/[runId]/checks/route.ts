@@ -10,7 +10,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ runId: s
   if (!user) return new Response("Sign in first", { status: 401 });
   const { runId } = await params;
   const run = await db.payRun.findUnique({ where: { id: runId }, include: { company: true } });
-  if (!run || !canUse(roleIn(user, run.companyId), "payroll")) return new Response("Not found", { status: 404 });
+  if (!run || !canUse(roleIn(user, run.companyId), "reports")) return new Response("Not found", { status: 404 });
   const only = new URL(req.url).searchParams.get("check");
   const checks = await db.check.findMany({
     where: { companyId: run.companyId, status: "ISSUED", ...(only ? { id: only } : {}), OR: [{ payRunLine: { payRunId: runId } }, { contractorPayment: { payRunId: runId } }] },

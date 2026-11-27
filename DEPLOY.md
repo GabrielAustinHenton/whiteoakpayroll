@@ -40,13 +40,60 @@ Use Neon through Vercel; it is standard Postgres, so it can move later.
    | Name | Value |
    |------|-------|
    | `ADMIN_SETUP_TOKEN` | any long random phrase you keep private (12+ characters) |
+   | `ADMIN_EMAILS` | the White Oak staff emails allowed to be admins, comma-separated |
 
    `TEST_IDS_ONLY` is on by default: only test SSNs (000-xx-xxxx) and EINs (00-xxxxxxx) are accepted
    until SSNs are encrypted and the security review is done. Do not set it to `false` before then.
 5. Merge the pull request (or, if already merged, open **Deployments**, click **⋯** on the latest one and
    **Redeploy**). The build creates the database tables automatically (`prisma migrate deploy`).
-6. Go to https://whiteoakpayroll.com/signup and create the first company. To make that login a White Oak
-   admin (sees every client), go to https://whiteoakpayroll.com/admin/claim and enter `ADMIN_SETUP_TOKEN`.
+6. Each White Oak admin goes to https://whiteoakpayroll.com/admin/setup and enters their name, email (one on
+   `ADMIN_EMAILS`), a password and the setup code (`ADMIN_SETUP_TOKEN`). If that email already has a login,
+   they enter its current password and it becomes an admin. Admins land on https://whiteoakpayroll.com/admin.
+
+### The admin portal
+
+- `/admin` lists every client company with its owner, headcount, plan tier, add-ons and monthly price, plus
+  totals (monthly run rate, billed this month and last month), a "needs attention" list, filing deadlines
+  across clients, billing by month, the admin list and the admin access log.
+- Opening a client shows their account **read-only**. To change something for a client, turn on edit mode
+  in the admin bar (asks for a reason, lasts one hour). Every view and edit-mode start is logged.
+- To remove an admin, delete their email from `ADMIN_EMAILS` and redeploy.
+
+## Adding payroll staff (for example Olga)
+
+Staff enter every client's data and run payroll from the **payroll desk** (`/ops`). They are not admins.
+
+1. In Vercel open **Settings → Environment Variables**, add `STAFF_EMAILS` with the staff email (several
+   are separated by commas), and redeploy.
+2. Sign in as an admin, open https://whiteoakpayroll.com/admin, find **Payroll staff**, type their name and
+   click **Send login invite**. If email isn't set up yet, the page shows the invite link: send it to them.
+3. They open the link, choose a password, and land on the payroll desk. To remove someone, delete their
+   email from `STAFF_EMAILS` and redeploy.
+
+## Turning on email (logins for staff and client owners)
+
+Inviting staff or a client's owner emails them a link to choose a password.
+Email goes through [Resend](https://resend.com) (free for 3,000 emails a month). Until it is set up,
+the app shows the invite link on screen after you save, so you can send it yourself.
+
+1. Sign up at https://resend.com.
+2. Open **Domains → Add Domain**, enter `whiteoakpayroll.com`, and pick the US region.
+3. Resend lists a few DNS records (a TXT record for DKIM named like `resend._domainkey`, and an MX and a
+   TXT record on the `send` subdomain). In GoDaddy open **My Products → whiteoakpayroll.com → DNS**,
+   click **Add New Record** for each one, and copy the type, name and value exactly as Resend shows them.
+   Back in Resend click **Verify DNS Records**; it usually turns green within an hour.
+4. In Resend open **API Keys → Create API Key**, name it `vercel`, permission **Sending access**, and copy it.
+5. In Vercel open **Settings → Environment Variables** and add:
+
+   | Name | Value |
+   |------|-------|
+   | `RESEND_API_KEY` | the key from step 4 |
+   | `EMAIL_FROM` | `White Oak Payroll <hello@whiteoakpayroll.com>` |
+   | `APP_URL` | `https://whiteoakpayroll.com` |
+
+6. Redeploy (**Deployments → ⋯ → Redeploy**) so the new variables take effect.
+
+Invite links work once and expire after 14 days. A pending invite can be resent from the employee's page.
 
 ## Moving off Vercel later
 
