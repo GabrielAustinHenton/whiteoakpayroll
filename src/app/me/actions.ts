@@ -10,7 +10,9 @@ import type { Prisma } from "@prisma/client";
 import { cents, str } from "@/components/ui";
 import { featuresFor } from "@/lib/app/features";
 import { normalizeSsn } from "@/lib/app/ids";
-import { stateW4From, w4From } from "@/lib/app/employee-input";
+import { stateW4From, w4EntryFrom, w4From } from "@/lib/app/employee-input";
+import { protectSsn } from "@/lib/security/field-crypto";
+import { recordWithholdingForms, syncI9 } from "@/lib/app/onboarding-store";
 import { validateSection1, type I9Attestation, type I9Section1 } from "@/lib/onboarding/i9";
 import { appUrl, buttonEmail, sendEmail } from "@/lib/email";
 
@@ -94,7 +96,7 @@ export async function saveMyDetails(form: FormData) {
     if (issues.length) return back(issues[0].message);
     if (signed.toLowerCase().replace(/\s+/g, " ") !== `${e.firstName} ${e.lastName}`.toLowerCase()) return back(`Sign by typing your name exactly as ${e.firstName} ${e.lastName}.`);
     Object.assign(data, {
-      ssn: ssn.value!,
+      ...protectSsn(ssn.value!),
       birthDate: new Date(`${dob}T00:00:00Z`),
       selfOnboardingDoneAt: new Date(),
       i9Section1: { ...section1, statusLabel: I9_LABEL[attestation.status], signature: signed, signedAt: section1.signature.signedAt } as unknown as Prisma.InputJsonValue,
@@ -102,6 +104,8 @@ export async function saveMyDetails(form: FormData) {
   }
 
   await db.employee.update({ where: { id: e.id }, data });
+  await recordWithholdingForms(e.id, w4EntryFrom(form), e.workState, data.stateW4, { source: "employee", enteredById: user.id, signedName: onboarding ? str(form.get("signature")) : undefined });
+  if (onboarding) await syncI9(e.id, e.hireDate, { section1: true });
   await audit(user.id, e.companyId, onboarding ? "employee.self_onboarded" : "employee.self_updated", { employeeId: e.id, bankChanged: !!account });
   if (onboarding) await tellOwners(e.companyId, e.company.tradeName || e.company.legalName, `${e.firstName} ${e.lastName}`, e.id);
   redirect(`/me?ok=${encodeURIComponent(onboarding ? `Thanks, you're all set. Bring your I-9 documents on your first day so ${e.company.tradeName || e.company.legalName} can finish.` : "Saved. Changes apply from your next paycheck.")}`);
