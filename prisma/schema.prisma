@@ -199,8 +199,15 @@ model Employee {
   firstName        String
   lastName         String
   email            String
-  /** Preview mode only accepts test SSNs (000-xx-xxxx). Encrypt before real data. */
+  /**
+   * Masked SSN for display and "has an SSN" checks: "***-**-1234", or "" until a self-onboarding
+   * employee enters it. Rows from before encryption may still hold a full test SSN (000-xx-xxxx).
+   */
   ssn              String
+  /** The full SSN, AES-256-GCM encrypted (src/lib/security/field-crypto.ts). */
+  ssnEncrypted     String?
+  /** I-9 Section 1 may only be completed after the job offer is accepted. */
+  offerAcceptedAt  DateTime?
   /** Empty until a self-onboarding employee enters it. */
   birthDate        DateTime?
   hireDate         DateTime
@@ -249,6 +256,73 @@ model Employee {
   payRunLines      PayRunLine[]
   advances         Advance[]
   retirementElections RetirementElection[]
+  w4Certificates   W4Certificate[]
+  stateCertificates StateWithholdingCertificate[]
+  i9Record         I9Record?
+}
+
+/** Every Form W-4 the employee gave, newest wins. Never edited in place, so audits see history. */
+model W4Certificate {
+  id                 String    @id @default(cuid())
+  employeeId         String
+  employee           Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  formYear           Int
+  /** The FormW4_2026 shape from src/lib/onboarding/w4.ts. */
+  data               Json
+  exempt             Boolean   @default(false)
+  exemptExpiresOn    DateTime?
+  /** "employee" (signed in the portal) or "client_hr" (entered from a paper form). */
+  source             String
+  enteredById        String?
+  signedName         String?
+  signedAt           DateTime?
+  createdAt          DateTime  @default(now())
+  supersededAt       DateTime?
+
+  @@index([employeeId, createdAt])
+}
+
+/** Every state withholding certificate (CT-W4, M-4, OR-W-4, IT-2104), newest per state wins. */
+model StateWithholdingCertificate {
+  id                 String    @id @default(cuid())
+  employeeId         String
+  employee           Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  state              String
+  formName           String
+  formRevision       String
+  /** The stateW4 JSON as entered. */
+  data               Json
+  source             String
+  enteredById        String?
+  signedName         String?
+  signedAt           DateTime?
+  createdAt          DateTime  @default(now())
+  supersededAt       DateTime?
+  /** When a copy was sent to the state (NY over 14 allowances, CT code E with high wages). */
+  sentToStateAt      DateTime?
+
+  @@index([employeeId, state, createdAt])
+}
+
+/**
+ * Form I-9 status and dates. Document details and images are not stored yet: until encrypted
+ * document storage exists, the employer keeps the paper I-9 and this row tracks deadlines.
+ */
+model I9Record {
+  id                  String    @id @default(cuid())
+  employeeId          String    @unique
+  employee            Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  edition             String    @default("01/20/25")
+  firstDayOfEmployment DateTime
+  section1CompletedAt DateTime?
+  section2DueOn       DateTime
+  section2CompletedAt DateTime?
+  section2ById        String?
+  /** Supplement B due date when work authorization expires. */
+  reverifyBy          DateTime?
+  /** Later of 3 years after the first day or 1 year after termination. Null while employed. */
+  retainUntil         DateTime?
+  updatedAt           DateTime  @updatedAt
 }
 
 model Contractor {

@@ -5,6 +5,8 @@ import { Field, Notice, dateStr, messages, prettyDate } from "@/components/ui";
 import { EmployeeForm } from "../employee-form";
 import { completeI9, rehireEmployee, resendEmployeeInvite, terminateEmployee, updateEmployee } from "../../actions";
 import { i9Deadlines } from "@/lib/onboarding/i9";
+import { onboardingTasks, stateCertificateDuties } from "@/lib/onboarding";
+import type { LaunchState } from "@/lib/tax-engine/state";
 import { loginStatus } from "@/lib/app/invites";
 
 export default async function EmployeePage({ params, searchParams }: { params: Promise<{ companyId: string; employeeId: string }>; searchParams: Promise<Record<string, string>> }) {
@@ -17,6 +19,24 @@ export default async function EmployeePage({ params, searchParams }: { params: P
   const waiting = !!e.selfOnboardingInvitedAt && !e.selfOnboardingDoneAt && e.status !== "TERMINATED";
   const needsI9 = !!e.selfOnboardingDoneAt && !e.i9CompletedAt && e.status !== "TERMINATED";
   const s1 = e.i9Section1 as Record<string, unknown> | null;
+  const [latestW4, stateCert, i9] = await Promise.all([
+    db.w4Certificate.findFirst({ where: { employeeId, supersededAt: null }, orderBy: { createdAt: "desc" } }),
+    db.stateWithholdingCertificate.findFirst({ where: { employeeId, state: e.workState, supersededAt: null }, orderBy: { createdAt: "desc" } }),
+    db.i9Record.findUnique({ where: { employeeId } }),
+  ]);
+  const ws = e.workState as LaunchState;
+  const done: Record<string, boolean> = {
+    w4: !!latestW4,
+    state_w4: !!stateCert,
+    i9_section1: !!i9?.section1CompletedAt || !!e.selfOnboardingDoneAt || !!e.i9CompletedAt,
+    i9_section2: !!i9?.section2CompletedAt || !!e.i9CompletedAt,
+    new_hire_report: false,
+  };
+  const tasks = e.status === "TERMINATED" ? [] : onboardingTasks({ firstDay: dateStr(i9?.firstDayOfEmployment ?? e.hireDate), workState: ws });
+  const sd = (stateCert?.data ?? {}) as Record<string, unknown>;
+  const duties = stateCert && ws === "NY"
+    ? stateCertificateDuties({ state: "NY", form: { status: "single_or_hoh", nycResident: false, yonkersResident: false, line1: Number(sd.allowances ?? 0), line2: Number(sd.nycAllowances ?? 0), additionalState: 0, additionalNyc: 0, additionalYonkers: 0, signature: { name: "on file", signedAt: "" } } }, { receivedOn: dateStr(stateCert.createdAt) })
+    : [];
   const hidden = (
     <>
       <input type="hidden" name="companyId" value={companyId} />
@@ -52,7 +72,23 @@ export default async function EmployeePage({ params, searchParams }: { params: P
           </form>
         </div>
       )}
-      <EmployeeForm companyId={companyId} schedules={schedules} e={e} action={updateEmployee} submit="Save changes" quick={waiting} />
+      {tasks.length > 0 && (
+        <div className="card">
+          <h2>Onboarding forms</h2>
+          <ul>
+            {tasks.map((t) => (
+              <li key={t.id}>
+                {done[t.id] ? "Done" : `Due ${t.due}`}: {t.title}
+                <span className="small muted"> ({t.id === "new_hire_report" ? "you, for now: White Oak doesn't file new-hire reports yet" : t.owner === "employee" ? "employee" : "you"})</span>
+                {!done[t.id] && t.ifMissing ? <span className="small muted"> {t.ifMissing}</span> : null}
+              </li>
+            ))}
+          </ul>
+          {duties.map((x) => <p key={x.action} className="small"><b>Send to the state:</b> {x.action}{x.due ? ` Due ${x.due}.` : ""}</p>)}
+        </div>
+      )}
+      {i9?.retainUntil && <p className="small muted">Keep their Form I-9 until {dateStr(i9.retainUntil)}, then destroy it.</p>}
+      <EmployeeForm companyId={companyId} schedules={schedules} e={e} action={updateEmployee} submit="Save changes" quick={waiting} latestW4={latestW4?.data} />
       {e.status !== "TERMINATED" && (
         <>
           <h2>Offboard</h2>

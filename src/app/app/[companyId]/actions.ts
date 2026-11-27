@@ -12,7 +12,11 @@ import { canOfferAdvance } from "@/lib/payroll/advances";
 import { approveAndPay, audit, voidCheck, createPayRun, generateFilings, recalculate, refreshInvoice } from "@/lib/app/payroll-service";
 import { DEFAULT_HOURS, type Frequency } from "@/lib/app/periods";
 import { nameKey, readTimeExport } from "@/lib/app/time-import";
-import { stateW4From, w4From } from "@/lib/app/employee-input";
+import { stateW4From, w4EntryFrom, w4From } from "@/lib/app/employee-input";
+import { protectSsn } from "@/lib/security/field-crypto";
+import { recordWithholdingForms, syncI9 } from "@/lib/app/onboarding-store";
+import { i9Dates } from "@/lib/app/onboarding-records";
+import { rehireNeedsNewI9 } from "@/lib/onboarding";
 import { FEATURE_KEYS, featureOverrides, featuresFor, type Features } from "@/lib/app/features";
 import { cents, str, usd } from "@/components/ui";
 
@@ -186,8 +190,10 @@ export async function createEmployee(form: FormData) {
   const scheduleId = str(form.get("payScheduleId"));
   const schedule = await validateEmployee(companyId, f, scheduleId, back);
   const e = await db.employee.create({
-    data: { ...f, companyId, payScheduleId: scheduleId, ssn: ssn.value!, status: statusFor(f), defaultHours: Number(str(form.get("defaultHours"))) || DEFAULT_HOURS[schedule.frequency as Frequency] },
+    data: { ...f, companyId, payScheduleId: scheduleId, ...protectSsn(ssn.value!), status: statusFor(f), defaultHours: Number(str(form.get("defaultHours"))) || DEFAULT_HOURS[schedule.frequency as Frequency] },
   });
+  await recordWithholdingForms(e.id, w4EntryFrom(form), f.workState, f.stateW4, { source: "client_hr", enteredById: user.id });
+  await syncI9(e.id, f.hireDate, { section1: !!f.i9CompletedAt, section2: !!f.i9CompletedAt, byUserId: user.id });
   await audit(user.id, companyId, "employee.created", { employeeId: e.id });
   const fee = await feeNote(companyId, role, mode);
   // Clients add people; White Oak staff review and maintain the record afterwards.
@@ -220,6 +226,7 @@ async function createSelfOnboardingEmployee(form: FormData, companyId: string, a
       defaultHours: Number(str(form.get("defaultHours"))) || DEFAULT_HOURS[schedule.frequency as Frequency],
     },
   });
+  await syncI9(e.id, f.hireDate);
   const invite = await inviteEmployeeLogin(e, c.tradeName || c.legalName);
   await audit(actorId, companyId, "employee.created", { employeeId: e.id, selfOnboarding: true, emailed: invite.emailed });
   const fee = await feeNote(companyId, role, mode);
@@ -250,6 +257,7 @@ export async function completeI9(form: FormData) {
     where: { id: e.id },
     data: { i9CompletedAt: new Date(), status: e.status === "TERMINATED" ? "TERMINATED" : "ACTIVE", i9Section1: { ...((e.i9Section1 as object) ?? {}), section2: { documents: docs, examinedBy: user.name, examinedAt: new Date().toISOString() } } },
   });
+  await syncI9(e.id, e.hireDate, { section1: true, section2: true, byUserId: user.id }, e.terminationDate);
   await audit(user.id, companyId, "employee.i9_section2", { employeeId: e.id });
   go(back, { ok: `${e.firstName} is active and will be on the next pay run.` });
 }
@@ -266,6 +274,7 @@ export async function updateEmployee(form: FormData) {
     const scheduleId = str(form.get("payScheduleId"));
     await validateEmployee(companyId, j, scheduleId, back);
     await db.employee.update({ where: { id: employeeId }, data: { ...j, payScheduleId: scheduleId, defaultHours: Number(str(form.get("defaultHours"))) || existing.defaultHours } });
+    await syncI9(employeeId, j.hireDate);
     await audit(user.id, companyId, "employee.updated", { employeeId });
     go(back, { ok: "Saved." });
   }
@@ -273,13 +282,16 @@ export async function updateEmployee(form: FormData) {
   const scheduleId = str(form.get("payScheduleId"));
   await validateEmployee(companyId, f, scheduleId, back);
   const ssnRaw = str(form.get("ssn"));
-  const ssn = ssnRaw ? normalizeSsn(ssnRaw) : { value: existing.ssn };
-  if ("error" in ssn && ssn.error) go(back, { error: ssn.error });
+  const ssn = ssnRaw ? normalizeSsn(ssnRaw) : null;
+  if (ssn?.error) go(back, { error: ssn.error });
+  if (!ssn && !existing.ssn) go(back, { error: "Enter their SSN." });
+  await recordWithholdingForms(employeeId, w4EntryFrom(form), f.workState, f.stateW4, { source: "client_hr", enteredById: user.id });
+  await syncI9(employeeId, f.hireDate, { section1: !!f.i9CompletedAt, section2: !!f.i9CompletedAt, byUserId: user.id }, existing.status === "TERMINATED" ? existing.terminationDate : null);
   await db.employee.update({
     where: { id: employeeId },
     data: {
       ...f,
-      ssn: ssn.value!,
+      ...(ssn ? protectSsn(ssn.value!) : {}),
       payScheduleId: scheduleId,
       defaultHours: Number(str(form.get("defaultHours"))) || existing.defaultHours,
       i9CompletedAt: f.i9CompletedAt ? (existing.i9CompletedAt ?? f.i9CompletedAt) : null,
@@ -299,6 +311,8 @@ export async function terminateEmployee(form: FormData) {
     where: { id: employeeId, companyId },
     data: { status: "TERMINATED", terminationDate: day(date), terminationReason: str(form.get("reason")) || null },
   });
+  const i9 = await db.i9Record.findUnique({ where: { employeeId } });
+  if (i9) await db.i9Record.update({ where: { employeeId }, data: { retainUntil: i9Dates(i9.firstDayOfEmployment, day(date)).retainUntil } });
   await audit(user.id, companyId, "employee.terminated", { employeeId, date });
   const fee = await feeNote(companyId, role, mode);
   go(`/app/${companyId}/people/${employeeId}`, {
@@ -310,8 +324,18 @@ export async function rehireEmployee(form: FormData) {
   const companyId = id(form);
   const { role, mode } = await requireWrite(companyId, "people");
   const employeeId = str(form.get("employeeId"));
+  const i9 = await db.i9Record.findUnique({ where: { employeeId } });
+  const today = new Date();
+  const fresh = !i9 || rehireNeedsNewI9(i9.firstDayOfEmployment.toISOString().slice(0, 10), today.toISOString().slice(0, 10));
   await db.employee.update({ where: { id: employeeId, companyId }, data: { status: "ONBOARDING", terminationDate: null, terminationReason: null, i9CompletedAt: null } });
-  go(`/app/${companyId}/people/${employeeId}`, { ok: `Rehired. Complete a new I-9 if they left more than 3 years ago.${await feeNote(companyId, role, mode)}` });
+  // Within 3 years the original I-9 is kept and updated with Supplement B; otherwise a new I-9 starts.
+  if (i9) await db.i9Record.update({ where: { employeeId }, data: fresh ? { ...i9Dates(today), section1CompletedAt: null, section2CompletedAt: null, section2ById: null } : { retainUntil: null, section2CompletedAt: null } });
+  const fee = await feeNote(companyId, role, mode);
+  go(`/app/${companyId}/people/${employeeId}`, {
+    ok: (fresh
+      ? "Rehired. Their I-9 is more than 3 years old, so complete a new Form I-9."
+      : "Rehired. Their I-9 is less than 3 years old: complete Supplement B (rehire) on the original I-9 and mark it done.") + fee,
+  });
 }
 
 export async function createContractor(form: FormData) {
