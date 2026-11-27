@@ -36,7 +36,7 @@ export default async function TimecardsPage({ params, searchParams }: { params: 
       <>
         <h1>Time Tracking</h1>
         <p>Employees punch in and out from their phones, only when they&apos;re at work. You set each work location on a map; punches from anywhere else are blocked or flagged. Hours flow into your pay runs.</p>
-        <p>{canUse(role, "billing") || manage ? <a href={`/app/${companyId}/billing`}>Turn on Time Tracking in Plan and billing</a> : "Ask White Oak to turn on Time Tracking."}</p>
+        <p>{canUse(role, "billing", company.serviceMode) || manage ? <a href={`/app/${companyId}/billing`}>Turn on Time Tracking in Plan and billing</a> : "Ask White Oak to turn on Time Tracking."}</p>
       </>
     );
   }

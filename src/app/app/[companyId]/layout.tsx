@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { ROLE_LABEL, adminEditingCompany, canUse, requireUser, roleIn, type Area } from "@/lib/auth/session";
 import { logAdminView } from "@/lib/app/admin-view";
 import { startAdminEdit, stopAdminEdit } from "../../admin/actions";
+import { NavLinks } from "@/components/nav-links";
 import { timeTrackingOn } from "@/lib/time/service";
 
 const NAV: { area: Area; href: string; label: string }[] = [
@@ -11,10 +12,14 @@ const NAV: { area: Area; href: string; label: string }[] = [
   { area: "add_people", href: "/people", label: "People" },
   { area: "reports", href: "/payroll", label: "Pay runs" },
   { area: "reports", href: "/filings", label: "Tax filings" },
+  { area: "reports", href: "/reports", label: "Reports" },
   { area: "advances", href: "/advances", label: "Advances" },
+  { area: "reports", href: "/retirement", label: "Retirement" },
+  { area: "settings", href: "/setup", label: "Setup guide" },
   { area: "settings", href: "/settings", label: "Company settings" },
   { area: "team", href: "/team", label: "Team access" },
   { area: "reports", href: "/billing", label: "Plan and billing" },
+  { area: "reports", href: "/activity", label: "Activity" },
 ];
 
 
@@ -26,10 +31,11 @@ export default async function CompanyLayout({ children, params }: { children: Re
   if (role === "EMPLOYEE") redirect("/me");
   const company = await db.company.findUnique({ where: { id: companyId } });
   if (!company) notFound();
+  const mode = company.serviceMode;
   const isAdmin = role === "PLATFORM_ADMIN";
   const editing = isAdmin && (await adminEditingCompany()) === companyId;
   if (isAdmin) await logAdminView(user.id, companyId);
-  const timeOn = canUse(role, "reports") && (await timeTrackingOn(companyId));
+  const timeOn = canUse(role, "reports", mode) && (await timeTrackingOn(companyId));
   return (
     <>
     {isAdmin && (
@@ -57,13 +63,14 @@ export default async function CompanyLayout({ children, params }: { children: Re
     )}
     <div className="app-shell">
       <nav className="app-nav" aria-label="Company">
-        <span className="company">{company.tradeName ?? company.legalName}</span>
-        <span className="small muted">{ROLE_LABEL[role]}</span>
-        {role === "PAYROLL_OPERATOR" && <a href="/ops" className="small">← Payroll desk (all clients)</a>}
-        {NAV.filter((n) => canUse(role, n.area)).map((n) => (
-          <a key={n.href} href={`/app/${companyId}${n.href}`}>{n.label}</a>
-        ))}
-        {timeOn && <a href={`/app/${companyId}/time`}>Time Tracking</a>}
+        <div className="app-nav-head">
+          <span className="company">{company.tradeName ?? company.legalName}</span>
+          <span className="small muted">{ROLE_LABEL[role]}</span>
+          {role === "PAYROLL_OPERATOR" && <a href="/ops" className="small">← Payroll desk (all clients)</a>}
+        </div>
+        <div className="app-nav-links">
+          <NavLinks links={NAV.filter((n) => canUse(role, n.area, mode) && !(n.href === "/activity" && role === "CLIENT_HR")).map((n) => ({ href: `/app/${companyId}${n.href}`, label: n.label, exact: n.href === "" })).concat(timeOn ? [{ href: `/app/${companyId}/time`, label: "Time Tracking", exact: false }] : [])} />
+        </div>
       </nav>
       <section>{children}</section>
     </div>
