@@ -6,6 +6,7 @@ export function TimeTabs({ companyId, manage }: { companyId: string; manage: boo
       <a href={base}>Timecards</a>
       <a href={`${base}/timesheets`}>Timesheets</a>
       <a href={`${base}/locations`}>Work locations</a>
+      <a href={`${base}/kiosks`}>Kiosks</a>
       {manage && <a href={`${base}/settings`}>Settings</a>}
     </nav>
   );

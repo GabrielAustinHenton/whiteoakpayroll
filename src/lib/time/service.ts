@@ -41,6 +41,8 @@ export interface PunchRequest {
   /** data:image/jpeg;base64,... from the camera, when the company asks for photos. */
   photo?: string | null;
   source: PunchSource;
+  /** A kiosk fixed at a work location: count the punch there without checking GPS. */
+  trustedLocation?: { id: string; name: string } | null;
   device?: { ip?: string | null; userAgent?: string | null };
   now?: Date;
 }
@@ -91,14 +93,16 @@ export async function punch(req: PunchRequest, actorUserId: string | null): Prom
   if (lastAt && now.getTime() - lastAt.getTime() < 20_000) return { ok: false, error: "You just punched. Wait a few seconds and try again." };
 
   const places = await db.workLocation.findMany({ where: { companyId, active: true } });
-  const check = checkPunch({
-    fix: req.fix,
-    places,
-    mode: settings.geofenceMode,
-    maxAccuracyMeters: settings.maxAccuracyMeters,
-    now,
-    previous: await previousPunch(employee.id),
-  });
+  const check = req.trustedLocation
+    ? { locationId: req.trustedLocation.id, locationName: req.trustedLocation.name, distanceMeters: null, inside: true, flags: [] as string[], blocked: null as string | null }
+    : checkPunch({
+        fix: req.fix,
+        places,
+        mode: settings.geofenceMode,
+        maxAccuracyMeters: settings.maxAccuracyMeters,
+        now,
+        previous: await previousPunch(employee.id),
+      });
 
   const record: Prisma.InputJsonObject = {
     latitude: req.fix?.latitude ?? null,

@@ -183,3 +183,17 @@ describe("timesheets", () => {
     expect(mealWarning(day("2026-12-01", 0), "CT")).toMatch(/Connecticut/);
   });
 });
+
+import { pinProblem } from "@/lib/time/kiosk";
+
+describe("kiosk PINs", () => {
+  it("takes 4 to 6 digits and refuses easy ones", () => {
+    expect(pinProblem("4821")).toBeNull();
+    expect(pinProblem("482193")).toBeNull();
+    expect(pinProblem("123")).toMatch(/4 to 6/);
+    expect(pinProblem("12a4")).toMatch(/4 to 6/);
+    expect(pinProblem("1111")).toMatch(/isn't/);
+    expect(pinProblem("1234")).toMatch(/isn't/);
+    expect(pinProblem("6543")).toMatch(/isn't/);
+  });
+});
