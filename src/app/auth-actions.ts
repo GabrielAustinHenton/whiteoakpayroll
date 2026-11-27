@@ -43,7 +43,7 @@ export async function signup(form: FormData) {
   });
   await audit(user.id, company.id, "company.signup", { legalName });
   await startSession(user.id);
-  redirect(`/app/${company.id}`);
+  redirect(`/app/${company.id}/setup`);
 }
 
 export async function login(form: FormData) {
