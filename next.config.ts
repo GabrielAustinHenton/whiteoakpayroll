@@ -5,8 +5,8 @@ const dev = process.env.NODE_ENV !== "production";
 /**
  * Browser security headers for every page. Payroll pages show SSNs, bank and pay data, so:
  * no framing (clickjacking), no MIME sniffing, HTTPS only, scripts only from this site, and
- * the browser features we do not use switched off. Geolocation stays allowed for this site
- * so a time clock can check where an employee punches in.
+ * the browser features we do not use switched off. Geolocation and camera stay allowed for this site
+ * so the time clock can check where an employee punches in and take a punch photo.
  */
 const csp = [
   "default-src 'self'",
@@ -30,7 +30,7 @@ const securityHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" },
-  { key: "Permissions-Policy", value: "camera=(), microphone=(), payment=(), usb=(), geolocation=(self)" },
+  { key: "Permissions-Policy", value: "camera=(self), microphone=(), payment=(), usb=(), geolocation=(self)" },
   { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
 ];
 
