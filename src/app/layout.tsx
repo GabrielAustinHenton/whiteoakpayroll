@@ -4,6 +4,7 @@ import "./globals.css";
 import { currentUser } from "@/lib/auth/session";
 import { databaseUrl } from "@/lib/db-url";
 import { logout } from "./auth-actions";
+import { NavLinks } from "@/components/nav-links";
 
 export const metadata: Metadata = {
   title: "White Oak Payroll",
@@ -25,20 +26,29 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   return (
     <html lang="en">
       <body>
+        <a href="#main" className="skip-link">Skip to main content</a>
         <div className="preview-banner" role="note">
           Preview: no money moves and only test data is accepted. Bank transfers to TD Bank are simulated.
         </div>
         <header className="site-header">
           <a href="/" className="brand">White Oak Payroll</a>
-          <nav>
-            <a href="/pricing">Pricing</a>
+          <nav aria-label="Main">
+            <NavLinks
+              links={[
+                { href: "/pricing", label: "Pricing" },
+                ...(user
+                  ? [
+                      ...(user.isStaff ? [{ href: "/ops", label: "Payroll desk" }] : []),
+                      ...(user.isPlatformAdmin ? [{ href: "/admin", label: "Admin" }] : []),
+                      ...(user.memberships.length > 0 ? [{ href: "/app", label: "My company" }] : []),
+                      { href: "/me", label: "My pay" },
+                      { href: "/account", label: "Account" },
+                    ]
+                  : []),
+              ]}
+            />
             {user ? (
               <>
-                {user.isStaff && <a href="/ops">Payroll desk</a>}
-                {user.isPlatformAdmin && <a href="/admin">Admin</a>}
-                {user.memberships.length > 0 && <a href="/app">My company</a>}
-                <a href="/me">My pay</a>
-                <a href="/account">Account</a>
                 <form action={logout} className="inline">
                   <button type="submit" className="link">Sign out</button>
                 </form>
@@ -56,7 +66,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
             Your White Oak admin or staff access is paused until you <a href="/account/two-step?required=1">turn on two-step sign-in</a>.
           </div>
         )}
-        <main>{children}</main>
+        <main id="main" tabIndex={-1}>{children}</main>
       </body>
     </html>
   );

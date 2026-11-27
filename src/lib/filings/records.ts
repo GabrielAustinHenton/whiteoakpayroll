@@ -12,6 +12,8 @@ export interface PaycheckRecord {
   employeeId: string;
   result: PaycheckResult;
   deductionDetail: Deduction[];
+  /** Employer 401(k)/SIMPLE contributions on this check (not wages; checks W-2 box 13). */
+  employerRetirement?: Cents;
   /** Tips reported (not modeled yet; always 0). */
   tips?: Cents;
 }
