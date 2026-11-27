@@ -9,6 +9,7 @@ import { SERIOUS_FLAGS, flagLabel } from "@/lib/time/flags";
 import { formatDistance } from "@/lib/time/geofence";
 import { timeSettings, timeTrackingOn } from "@/lib/time/service";
 import { TimeTabs } from "./tabs";
+import { AddShift, DecideCorrection, EditShift } from "./shift-forms";
 
 type PunchRecord = { latitude?: number | null; longitude?: number | null; accuracy?: number | null; distanceMeters?: number | null; locationName?: string | null; inside?: boolean };
 
@@ -48,7 +49,7 @@ export default async function TimecardsPage({ params, searchParams }: { params: 
   const to = startOfLocalDay(addDays(wk, 7), tz);
   const now = new Date();
 
-  const [entries, openNow, blocked, locationCount] = await Promise.all([
+  const [entries, openNow, blocked, locationCount, corrections] = await Promise.all([
     db.timeEntry.findMany({
       where: { companyId, clockInAt: { gte: from, lt: to } },
       include: { breaks: true, employee: true, location: true },
@@ -57,7 +58,10 @@ export default async function TimecardsPage({ params, searchParams }: { params: 
     db.timeEntry.findMany({ where: { companyId, clockOutAt: null }, include: { employee: true, location: true, breaks: true }, orderBy: { clockInAt: "asc" } }),
     db.auditLog.findMany({ where: { companyId, action: "time.punch_blocked", createdAt: { gte: from, lt: to } }, orderBy: { createdAt: "desc" }, take: 50 }),
     db.workLocation.count({ where: { companyId, active: true } }),
+    db.timeCorrection.findMany({ where: { companyId, status: "PENDING" }, include: { employee: true }, orderBy: { createdAt: "asc" } }),
   ]);
+  const back = `/app/${companyId}/time`;
+  const activeEmployees = await db.employee.findMany({ where: { companyId, status: { not: "TERMINATED" } }, orderBy: { lastName: "asc" }, select: { id: true, firstName: true, lastName: true } });
   const names = new Map((await db.employee.findMany({ where: { companyId }, select: { id: true, firstName: true, lastName: true } })).map((e) => [e.id, `${e.firstName} ${e.lastName}`]));
 
   const byEmp = new Map<string, typeof entries>();
@@ -72,6 +76,18 @@ export default async function TimecardsPage({ params, searchParams }: { params: 
       <Notice error={error} ok={ok} />
       {locationCount === 0 && s.geofenceMode !== "OFF" && (
         <p className="notice error">No work locations yet, so punches aren&apos;t checked against a place. <a href={`/app/${companyId}/time/locations`}>Add a work location</a>.</p>
+      )}
+
+      {corrections.length > 0 && (
+        <>
+          <h2>Missed-punch requests</h2>
+          {corrections.map((c) => (
+            <div className="card" key={c.id}>
+              <p><b>{c.employee.firstName} {c.employee.lastName}</b>: {c.entryId ? "forgot to punch out" : "missed shift"}, {dayLabel(localDate(c.clockInAt, tz))} {localTime(c.clockInAt, tz)} to {localTime(c.clockOutAt, tz)}{c.mealMinutes ? `, ${c.mealMinutes}-minute meal` : ""}.<br /><span className="small muted">&ldquo;{c.reason}&rdquo;</span></p>
+              {manage ? <DecideCorrection companyId={companyId} id={c.id} back={back} /> : <p className="small muted">Waiting for your payroll manager.</p>}
+            </div>
+          ))}
+        </>
       )}
 
       <h2>Working now</h2>
@@ -139,7 +155,11 @@ export default async function TimecardsPage({ params, searchParams }: { params: 
                     </td>
                     <td className="small">{e.breaks.map((b) => <div key={b.id}>{b.kind === "REST" ? "Rest" : "Meal"} {localTime(b.startAt, tz)}–{b.endAt ? localTime(b.endAt, tz) : "now"}</div>)}</td>
                     <td className="num">{formatMinutes(paidMinutes(e, now))}</td>
-                    <td>{e.flags.map((f) => <span key={f} className={`flag ${SERIOUS_FLAGS.has(f) ? "serious" : ""}`}>{flagLabel(f)}</span>)}</td>
+                    <td>
+                      {e.flags.map((f) => <span key={f} className={`flag ${SERIOUS_FLAGS.has(f) ? "serious" : ""}`}>{flagLabel(f)}</span>)}
+                      {e.note && <div className="small muted">{e.note}</div>}
+                      {manage && <EditShift companyId={companyId} entry={e} date={localDate(e.clockInAt, tz)} tz={tz} back={back} />}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -147,6 +167,8 @@ export default async function TimecardsPage({ params, searchParams }: { params: 
           </div>
         </details>
       ))}
+
+      {manage && <AddShift companyId={companyId} employees={activeEmployees} today={today} back={back} />}
 
       {blocked.length > 0 && (
         <>

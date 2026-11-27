@@ -8,6 +8,7 @@ import { PRICING } from "@/lib/pricing";
 import type { TaxLine } from "@/lib/tax-engine";
 import { DEDUCTION_LABELS } from "@/lib/pay-run/review";
 import { GridKeys } from "./grid-keys";
+import { FillHoursFromTime } from "../../time/fill-hours";
 import { approveRun, deleteDraftRun, removeContractorPayment, saveRunInputs, voidOrReissueCheck, importHours } from "../../actions";
 
 function group(details: LineDetail[], payer: "employee" | "employer") {
@@ -66,6 +67,7 @@ export default async function PayRunPage({ params, searchParams }: { params: Pro
       <p className="muted">{run.paySchedule.name} · pays {iso(run.periodStart)} to {iso(run.periodEnd)}{run.fundingRef ? ` · funding ref ${run.fundingRef} (simulated)` : ""}</p>
       <Notice error={error} ok={ok} />
 
+      {draft && <FillHoursFromTime companyId={companyId} payRunId={run.id} period={`${iso(run.periodStart)} to ${iso(run.periodEnd)}`} />}
       {draft && (
         <details className="card" open={!!imported}>
           <summary><b>Import hours from BuddyPunch</b> (or another time clock)</summary>
