@@ -14,6 +14,7 @@ const NAV: { area: Area; href: string; label: string }[] = [
   { area: "settings", href: "/settings", label: "Company settings" },
   { area: "team", href: "/team", label: "Team access" },
   { area: "reports", href: "/billing", label: "Plan and billing" },
+  { area: "reports", href: "/activity", label: "Activity" },
 ];
 
 
@@ -58,7 +59,7 @@ export default async function CompanyLayout({ children, params }: { children: Re
         <span className="company">{company.tradeName ?? company.legalName}</span>
         <span className="small muted">{ROLE_LABEL[role]}</span>
         {role === "PAYROLL_OPERATOR" && <a href="/ops" className="small">← Payroll desk (all clients)</a>}
-        {NAV.filter((n) => canUse(role, n.area)).map((n) => (
+        {NAV.filter((n) => canUse(role, n.area) && !(n.href === "/activity" && role === "CLIENT_HR")).map((n) => (
           <a key={n.href} href={`/app/${companyId}${n.href}`}>{n.label}</a>
         ))}
       </nav>

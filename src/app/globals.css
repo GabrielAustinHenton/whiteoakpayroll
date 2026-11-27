@@ -87,3 +87,14 @@ h2 { margin-top: 32px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 tfoot th { border-top: 2px solid var(--line); }
 main:has(.admin-title) { max-width: 1280px; }
+
+/* Activity log */
+a.button { display: inline-block; padding: 6px 10px; border-radius: 6px; text-decoration: none; background: var(--accent); color: var(--bg); }
+a.button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+.empty { border: 1px dashed var(--line); border-radius: 10px; padding: 24px 16px; text-align: center; margin: 24px 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+.chips a { border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; text-decoration: none; font-size: 0.9rem; }
+.chips a[aria-current="page"] { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+.activity { list-style: none; padding: 0; margin: 0; }
+.activity li { display: grid; grid-template-columns: 13rem 1fr auto; gap: 4px 16px; align-items: baseline; padding: 10px 0; border-bottom: 1px solid var(--line); }
+@media (max-width: 720px) { .activity li { grid-template-columns: 1fr auto; } .activity time { grid-column: 1 / -1; } }
