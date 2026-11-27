@@ -10,6 +10,7 @@ const NAV: { area: Area; href: string; label: string }[] = [
   { area: "add_people", href: "/people", label: "People" },
   { area: "reports", href: "/payroll", label: "Pay runs" },
   { area: "reports", href: "/filings", label: "Tax filings" },
+  { area: "reports", href: "/reports", label: "Reports" },
   { area: "advances", href: "/advances", label: "Advances" },
   { area: "settings", href: "/settings", label: "Company settings" },
   { area: "team", href: "/team", label: "Team access" },
