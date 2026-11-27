@@ -77,6 +77,7 @@ export interface PayRunReview {
 export const DEDUCTION_LABELS: Record<DeductionKind, string> = {
   retirement_pretax: "401(k), pre-tax",
   retirement_roth: "401(k), Roth",
+  simple_ira: "SIMPLE IRA",
   state_auto_ira: "State retirement program (auto-IRA)",
   section125_health: "Health, dental, vision premiums",
   hsa_section125: "HSA contributions",
