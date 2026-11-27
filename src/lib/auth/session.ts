@@ -10,18 +10,42 @@ const DAYS = 14;
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 
-/** Start a session: random token in an httpOnly cookie, only its hash in the database. */
-export async function startSession(userId: string) {
+const cookieOpts = (expires: Date) => ({
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production",
+  sameSite: "lax" as const,
+  path: "/",
+  expires,
+});
+
+/**
+ * Start a session: random token in an httpOnly cookie, only its hash in the database. With
+ * `mfaPending` the password was right but a two-step code is still owed: the session lasts 10
+ * minutes and signs nobody in until `completeTwoStep` runs.
+ */
+export async function startSession(userId: string, opts: { mfaPending?: boolean } = {}) {
   const token = randomBytes(32).toString("base64url");
+  const expiresAt = new Date(Date.now() + (opts.mfaPending ? 10 * 60_000 : DAYS * 86_400_000));
+  await db.session.create({ data: { userId, tokenHash: sha256(token), expiresAt, mfaPending: !!opts.mfaPending } });
+  (await cookies()).set(COOKIE, token, cookieOpts(expiresAt));
+}
+
+/** The half-finished sign-in waiting for a two-step code, if any. */
+export async function pendingTwoStep() {
+  const token = (await cookies()).get(COOKIE)?.value;
+  if (!token) return null;
+  const s = await db.session.findUnique({ where: { tokenHash: sha256(token) }, include: { user: true } });
+  if (!s || !s.mfaPending || s.expiresAt < new Date()) return null;
+  return s;
+}
+
+/** The two-step code was right: turn the pending session into a full one. */
+export async function completeTwoStep(sessionId: string) {
+  const jar = await cookies();
+  const token = jar.get(COOKIE)?.value;
   const expiresAt = new Date(Date.now() + DAYS * 86_400_000);
-  await db.session.create({ data: { userId, tokenHash: sha256(token), expiresAt } });
-  (await cookies()).set(COOKIE, token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
-    expires: expiresAt,
-  });
+  await db.session.update({ where: { id: sessionId }, data: { mfaPending: false, mfaAttempts: 0, expiresAt } });
+  if (token) jar.set(COOKIE, token, cookieOpts(expiresAt));
 }
 
 export async function endSession() {
@@ -35,14 +59,25 @@ export async function currentUser() {
   const token = (await cookies()).get(COOKIE)?.value;
   if (!token) return null;
   const s = await db.session.findUnique({ where: { tokenHash: sha256(token) }, include: { user: { include: { memberships: true } } } });
-  if (!s || s.expiresAt < new Date()) return null;
+  if (!s || s.mfaPending || s.expiresAt < new Date()) return null;
   // ADMIN_EMAILS, when set, is the allowlist: removing an email there revokes admin access at once.
   // STAFF_EMAILS lists White Oak payroll staff (operators); a login with a password is required.
+  const admin = s.user.isPlatformAdmin && adminAllowed(s.user.email);
+  const staff = Boolean(s.user.passwordHash) && isStaffEmail(s.user.email);
+  // White Oak admins and staff can reach every client's SSNs and bank details, so until they turn
+  // on two-step sign-in they get no White Oak access at all (only their own company, if any).
+  const needsTwoStep = (admin || staff) && twoStepRequiredForStaff() && !s.user.totpEnabledAt;
   return {
     ...s.user,
-    isPlatformAdmin: s.user.isPlatformAdmin && adminAllowed(s.user.email),
-    isStaff: Boolean(s.user.passwordHash) && isStaffEmail(s.user.email),
+    isPlatformAdmin: admin && !needsTwoStep,
+    isStaff: staff && !needsTwoStep,
+    needsTwoStep,
   };
+}
+
+/** On unless TWO_STEP_FOR_STAFF=off (e.g. a local dev database). */
+export function twoStepRequiredForStaff(env: Record<string, string | undefined> = process.env): boolean {
+  return (env.TWO_STEP_FOR_STAFF ?? "").trim().toLowerCase() !== "off";
 }
 
 export type CurrentUser = NonNullable<Awaited<ReturnType<typeof currentUser>>>;
@@ -105,6 +140,7 @@ export const isWhiteOak = (role: AppRole | null) => role === "PAYROLL_OPERATOR" 
 /** Gate a White Oak payroll staff page (admins can look too). */
 export async function requireStaff(): Promise<CurrentUser> {
   const user = await requireUser();
+  if (user.needsTwoStep) redirect("/account/two-step?required=1");
   if (!user.isStaff && !user.isPlatformAdmin) redirect("/app");
   return user;
 }
@@ -163,6 +199,7 @@ export async function requireWrite(companyId: string, area: Area) {
 /** Gate a White Oak admin page. */
 export async function requireAdmin(): Promise<CurrentUser> {
   const user = await requireUser();
+  if (user.needsTwoStep) redirect("/account/two-step?required=1");
   if (!user.isPlatformAdmin) redirect("/admin/claim");
   return user;
 }
