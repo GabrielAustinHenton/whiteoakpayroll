@@ -12,10 +12,11 @@ if (!url) {
   console.log("No database URL set: skipping prisma migrate deploy.");
 } else {
   const env = { ...e, DATABASE_URL: url };
-  // Time Tracking migrations were briefly pushed under these names (2026-11-27). A database that
-  // already had the tables failed on them, and Prisma refuses every later deploy until a failed
-  // migration is marked rolled back. Their first statement failed, so nothing was applied.
-  // Marking one that was never attempted just errors, which is ignored.
+  // Time Tracking migrations were briefly pushed under these names (2026-11-27). Preview deploys
+  // share this database, and one that already had the tables failed on them. Prisma then refuses
+  // every later deploy (P3009) until the failed migration is marked rolled back. Their first
+  // statement failed, so nothing was applied. Marking one that was never attempted just errors,
+  // which is ignored.
   for (const name of ["20261127050000_time_tracking", "20261127060000_timesheets", "20261127070000_kiosk"]) {
     try {
       execSync(`npx prisma migrate resolve --rolled-back ${name}`, { stdio: "ignore", env });
@@ -24,5 +25,16 @@ if (!url) {
       // not recorded as failed: nothing to do
     }
   }
-  execSync("npx prisma migrate deploy", { stdio: "inherit", env });
+  // Several deploys (main plus previews) can migrate the same database at once. Prisma holds an
+  // advisory lock and gives up after 10 seconds (P1002), so wait and try again before failing.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      execSync("npx prisma migrate deploy", { stdio: "inherit", env });
+      break;
+    } catch (err) {
+      if (attempt >= 4) throw err;
+      console.log(`prisma migrate deploy failed (attempt ${attempt} of 4). Trying again in 20 seconds.`);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20_000);
+    }
+  }
 }
