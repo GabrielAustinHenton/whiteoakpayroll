@@ -113,6 +113,7 @@ model Company {
   timeEntries   TimeEntry[]
   timesheets    Timesheet[]
   timeCorrections TimeCorrection[]
+  kiosks        Kiosk[]
   filings       Filing[]
   invoices      Invoice[]
   auditLogs     AuditLog[]
@@ -185,6 +186,7 @@ model Employee {
   timeEntries      TimeEntry[]
   timesheets       Timesheet[]
   timeCorrections  TimeCorrection[]
+  kioskPin         KioskPin?
   firstName        String
   lastName         String
   email            String
@@ -446,6 +448,7 @@ model WorkLocation {
   active       Boolean     @default(true)
   createdAt    DateTime    @default(now())
   entries      TimeEntry[]
+  kiosks       Kiosk[]
 
   @@index([companyId])
 }
@@ -543,4 +546,37 @@ model TimeCorrection {
   createdAt    DateTime  @default(now())
 
   @@index([companyId, status])
+}
+
+/**
+ * A shared tablet at a work site where employees punch with their name and PIN. A one-time setup
+ * link (24 hours) turns a device into the kiosk by giving it a device cookie; only hashes are stored.
+ */
+model Kiosk {
+  id               String        @id @default(cuid())
+  companyId        String
+  company          Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name             String
+  /** Punches here count at this location. */
+  locationId       String?
+  location         WorkLocation? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  /** Also check the tablet's own GPS against the geofence (off for tablets without location). */
+  checkLocation    Boolean       @default(false)
+  setupCodeHash    String?       @unique
+  setupExpiresAt   DateTime?
+  deviceTokenHash  String?       @unique
+  lastSeenAt       DateTime?
+  revokedAt        DateTime?
+  createdAt        DateTime      @default(now())
+}
+
+/** An employee's kiosk PIN (scrypt hash), with lockout after repeated wrong tries. */
+model KioskPin {
+  id          String    @id @default(cuid())
+  employeeId  String    @unique
+  employee    Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  pinHash     String
+  failedTries Int       @default(0)
+  lockedUntil DateTime?
+  updatedAt   DateTime  @updatedAt
 }
