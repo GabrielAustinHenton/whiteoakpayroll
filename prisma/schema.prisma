@@ -26,6 +26,15 @@ enum PayFrequency {
   MONTHLY
 }
 
+/**
+ * How a company is run. SELF_SERVE: the owner runs payroll and employees use the portal.
+ * MANAGED: White Oak staff (the payroll desk) enter everything; the client sees reports and adds people.
+ */
+enum ServiceMode {
+  SELF_SERVE
+  MANAGED
+}
+
 enum PayBasis {
   HOURLY
   SALARIED
@@ -66,6 +75,9 @@ model User {
   inviteTokenHash String?   @unique
   inviteExpiresAt DateTime?
   invitedAt       DateTime?
+  /** SHA-256 of an emailed "forgot password" link's token; single use, short-lived. */
+  resetTokenHash  String?   @unique
+  resetExpiresAt  DateTime?
   /** Only White Oak staff. Client roles live on Membership. */
   isPlatformAdmin Boolean   @default(false)
   createdAt    DateTime     @default(now())
@@ -100,7 +112,13 @@ model Company {
   depositSchedule String        @default("MONTHLY")
   /** Next paper check number to print. */
   nextCheckNumber Int           @default(1001)
+  serviceMode   ServiceMode     @default(SELF_SERVE)
+  /** Per-company feature switches over the mode's defaults (src/lib/app/features.ts). */
+  features      Json            @default("{}")
+  /** When the owner finished the setup wizard. */
+  setupCompletedAt DateTime?
   createdAt     DateTime        @default(now())
+  reminders     Reminder[]
   stateAccounts StateAccount[]
   memberships   Membership[]
   paySchedules  PaySchedule[]
@@ -182,7 +200,8 @@ model Employee {
   email            String
   /** Preview mode only accepts test SSNs (000-xx-xxxx). Encrypt before real data. */
   ssn              String
-  birthDate        DateTime
+  /** Empty until a self-onboarding employee enters it. */
+  birthDate        DateTime?
   hireDate         DateTime
   terminationDate  DateTime?
   terminationReason String?
@@ -219,6 +238,12 @@ model Employee {
   /** Section 125 health premium per paycheck, cents. */
   healthPremiumCents Int        @default(0)
   electronicW2Consent Boolean   @default(true)
+  /** Self-onboarding: the employee was invited to enter their own details, W-4s and bank account. */
+  selfOnboardingInvitedAt DateTime?
+  /** ...and finished their part. The employer then completes I-9 Section 2. */
+  selfOnboardingDoneAt    DateTime?
+  /** I-9 Section 1 as the employee attested it (status, signature), when done in the portal. */
+  i9Section1       Json?
   createdAt        DateTime     @default(now())
   payRunLines      PayRunLine[]
   advances         Advance[]
@@ -393,4 +418,15 @@ model Check {
   createdAt           DateTime           @default(now())
 
   @@unique([companyId, number])
+}
+
+/** A reminder that was sent, so the daily job sends each one once. key e.g. "approve:<runId>". */
+model Reminder {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  key       String
+  sentAt    DateTime @default(now())
+
+  @@unique([companyId, key])
 }

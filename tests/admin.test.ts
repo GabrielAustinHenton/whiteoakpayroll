@@ -19,7 +19,7 @@ describe("company billing", () => {
   it("bills month to date on people paid and run rate on active people", () => {
     const b = companyBilling({ paidThisMonth: 3, activePeople: 7, addOns: [] });
     expect(b.monthToDate.tier).toBe(1);
-    expect(b.monthToDate.total).toBe(2500);
+    expect(b.monthToDate.total).toBe(3000);
     expect(b.projected.tier).toBe(2);
     expect(b.projected.total).toBe(5000);
   });

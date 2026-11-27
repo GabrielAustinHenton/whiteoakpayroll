@@ -2,12 +2,13 @@ import { db } from "@/lib/db";
 import { canUse, requireArea } from "@/lib/auth/session";
 import { Notice, messages, prettyDate, usd } from "@/components/ui";
 import { FREQUENCY_LABEL, nextPeriod, type Frequency } from "@/lib/app/periods";
+import { approveBy } from "@/lib/app/todos";
 import { startPayRun } from "../actions";
 
 export default async function Payroll({ params, searchParams }: { params: Promise<{ companyId: string }>; searchParams: Promise<Record<string, string>> }) {
   const { companyId } = await params;
-  const { role } = await requireArea(companyId, "reports");
-  const staff = canUse(role, "payroll");
+  const { role, mode } = await requireArea(companyId, "reports");
+  const staff = canUse(role, "payroll", mode);
   const { error, ok } = await messages(searchParams);
   const schedules = await db.paySchedule.findMany({ where: { companyId }, include: { payRuns: { where: { offCycle: false }, orderBy: { payday: "desc" }, take: 1 } } });
   const runs = await db.payRun.findMany({ where: { companyId, ...(staff ? {} : { status: { in: ["APPROVED", "PAID"] } }) }, orderBy: { payday: "desc" }, include: { paySchedule: true, _count: { select: { lines: true } } } });
@@ -16,14 +17,14 @@ export default async function Payroll({ params, searchParams }: { params: Promis
     <>
       <h1>Pay runs</h1>
       <Notice error={error} ok={ok} />
-      {!staff && <p className="muted">White Oak runs your payroll. Open a pay run for its register, paystubs and checks.</p>}
+      {!staff && <p className="muted">{mode === "MANAGED" ? "White Oak runs your payroll." : "Your company owner approves payroll."} Open a pay run for its register, paystubs and checks.</p>}
       {staff && schedules.length === 0 && <p className="notice">Create a pay schedule in <a href={`/app/${companyId}/settings#schedules`}>Company settings</a> first.</p>}
       {staff && schedules.map((s) => {
         const p = nextPeriod(s.frequency as Frequency, iso(s.anchorPayday), s.payLagDays, s.payRuns[0] ? iso(s.payRuns[0].payday) : null);
         return (
           <div className="card" key={s.id}>
             <p><b>{s.name}</b> · {FREQUENCY_LABEL[s.frequency as Frequency]}</p>
-            <p className="muted">Next: pays {p.periodStart} to {p.periodEnd}, payday {p.payday}</p>
+            <p className="muted">Next: pays {p.periodStart} to {p.periodEnd}, payday {prettyDate(new Date(`${p.payday}T00:00:00Z`))}. Approve by {prettyDate(new Date(`${approveBy(p.payday)}T00:00:00Z`))} for on-time direct deposit.</p>
             <form action={startPayRun}>
               <input type="hidden" name="companyId" value={companyId} />
               <input type="hidden" name="payScheduleId" value={s.id} />
