@@ -10,11 +10,13 @@ const NAV: { area: Area; href: string; label: string }[] = [
   { area: "add_people", href: "/people", label: "People" },
   { area: "reports", href: "/payroll", label: "Pay runs" },
   { area: "reports", href: "/filings", label: "Tax filings" },
+  { area: "reports", href: "/reports", label: "Reports" },
   { area: "advances", href: "/advances", label: "Advances" },
   { area: "settings", href: "/setup", label: "Setup guide" },
   { area: "settings", href: "/settings", label: "Company settings" },
   { area: "team", href: "/team", label: "Team access" },
   { area: "reports", href: "/billing", label: "Plan and billing" },
+  { area: "reports", href: "/activity", label: "Activity" },
 ];
 
 
@@ -60,7 +62,7 @@ export default async function CompanyLayout({ children, params }: { children: Re
         <span className="company">{company.tradeName ?? company.legalName}</span>
         <span className="small muted">{ROLE_LABEL[role]}</span>
         {role === "PAYROLL_OPERATOR" && <a href="/ops" className="small">← Payroll desk (all clients)</a>}
-        {NAV.filter((n) => canUse(role, n.area, mode)).map((n) => (
+        {NAV.filter((n) => canUse(role, n.area, mode) && !(n.href === "/activity" && role === "CLIENT_HR")).map((n) => (
           <a key={n.href} href={`/app/${companyId}${n.href}`}>{n.label}</a>
         ))}
       </nav>

@@ -109,3 +109,19 @@ details.help summary { cursor: pointer; color: var(--accent); }
 .flags { list-style: none; padding: 0; display: grid; gap: 6px; }
 .flags li { border-left: 4px solid #b7791f; padding: 6px 10px; background: var(--card); border-radius: 6px; }
 .flags li.block { border-left-color: var(--danger); }
+
+/* Reports */
+.section-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; justify-content: space-between; }
+.section-head h2 { margin-bottom: 0; }
+a.button { display: inline-block; padding: 6px 10px; border-radius: 6px; text-decoration: none; background: var(--accent); color: var(--bg); }
+a.button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+.empty { border: 1px dashed var(--line); border-radius: 10px; padding: 24px 16px; text-align: center; margin: 24px 0; }
+.empty p { margin: 4px 0; }
+
+/* Activity log */
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+.chips a { border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; text-decoration: none; font-size: 0.9rem; }
+.chips a[aria-current="page"] { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+.activity { list-style: none; padding: 0; margin: 0; }
+.activity li { display: grid; grid-template-columns: 13rem 1fr auto; gap: 4px 16px; align-items: baseline; padding: 10px 0; border-bottom: 1px solid var(--line); }
+@media (max-width: 720px) { .activity li { grid-template-columns: 1fr auto; } .activity time { grid-column: 1 / -1; } }

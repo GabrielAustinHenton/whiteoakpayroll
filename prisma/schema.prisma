@@ -390,6 +390,8 @@ model AuditLog {
   action    String
   detail    Json?
   createdAt DateTime @default(now())
+
+  @@index([companyId, createdAt])
 }
 
 enum CheckStatus {
