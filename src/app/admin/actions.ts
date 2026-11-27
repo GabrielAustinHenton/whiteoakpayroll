@@ -5,6 +5,7 @@ import { requireAdmin, sameCompanyReferer, setAdminEditing } from "@/lib/auth/se
 import { audit } from "@/lib/app/payroll-service";
 import { db } from "@/lib/db";
 import { str } from "@/components/ui";
+import { adminEmails } from "@/lib/auth/admins";
 
 /** Unlock changes to one client company for an hour. Logged in the company's audit trail. */
 export async function startAdminEdit(form: FormData) {
@@ -73,7 +74,42 @@ export async function setStaffBureau(form: FormData) {
   const u = await db.user.findUnique({ where: { id: userId } });
   if (!u) redirect("/admin#staff-requests");
   if (bureauId && !(await db.bureau.findUnique({ where: { id: bureauId } }))) redirect(`/admin?error=${encodeURIComponent("That bureau no longer exists.")}#staff-requests`);
-  await db.user.update({ where: { id: userId }, data: { bureauId } });
+  // Owning a bureau doesn't carry over to another one.
+  await db.user.update({ where: { id: userId }, data: { bureauId, ...(bureauId === u!.bureauId ? {} : { bureauOwner: false }) } });
   await audit(user.id, null, "admin.staff_bureau", { email: u!.email, from: u!.bureauId, to: bureauId, by: user.email });
   redirect(`/admin?ok=${encodeURIComponent(`Updated ${u!.name}'s bureau.`)}#staff-requests`);
+}
+
+/**
+ * Make someone the owner of a bureau (e.g. Jose for his firm): they become approved staff of that
+ * bureau, see only its companies, and approve or remove its staff. They stop being a White Oak admin
+ * (also take their email out of ADMIN_EMAILS). They need an existing login.
+ */
+export async function makeBureauOwner(form: FormData) {
+  const user = await requireAdmin();
+  const email = str(form.get("email")).toLowerCase();
+  const bureauId = str(form.get("bureauId"));
+  const fail = (error: string): never => redirect(`/admin?error=${encodeURIComponent(error)}#bureaus`);
+  const bureau = bureauId ? await db.bureau.findUnique({ where: { id: bureauId } }) : null;
+  if (!bureau) fail("Choose the bureau.");
+  const u = await db.user.findUnique({ where: { email } });
+  if (!u || !u.passwordHash) fail(`${email || "That email"} has no White Oak login yet. Ask them to sign up at /staff/join first, then make them the owner.`);
+  if (u!.id === user.id) fail("You can't make yourself a bureau owner: you'd lose admin access.");
+  await db.user.update({
+    where: { id: u!.id },
+    data: { staffStatus: "APPROVED", bureauId: bureau!.id, bureauOwner: true, isPlatformAdmin: false, staffDecidedAt: new Date(), staffDecidedById: user.id },
+  });
+  await audit(user.id, null, "admin.bureau_owner", { email, bureau: bureau!.name, by: user.email });
+  const stillListed = adminEmails()?.includes(email);
+  redirect(`/admin?ok=${encodeURIComponent(`${u!.name} now owns ${bureau!.name}.${stillListed ? " Their email is still in ADMIN_EMAILS in Vercel: take it out and redeploy, or they keep full admin access." : ""}`)}#bureaus`);
+}
+
+/** Stop someone owning their bureau (they stay ordinary staff there). */
+export async function removeBureauOwner(form: FormData) {
+  const user = await requireAdmin();
+  const u = await db.user.findUnique({ where: { id: str(form.get("userId")) } });
+  if (!u) redirect("/admin#bureaus");
+  await db.user.update({ where: { id: u!.id }, data: { bureauOwner: false } });
+  await audit(user.id, null, "admin.bureau_owner_removed", { email: u!.email, by: user.email });
+  redirect(`/admin?ok=${encodeURIComponent(`${u!.name} is no longer a bureau owner.`)}#bureaus`);
 }

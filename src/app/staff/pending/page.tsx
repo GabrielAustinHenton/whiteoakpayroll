@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth/session";
 import { prettyDate } from "@/components/ui";
 import { logout } from "../../auth-actions";
+import { db } from "@/lib/db";
 
 export const metadata = { title: "Staff request · White Oak Payroll" };
 export const dynamic = "force-dynamic";
@@ -11,12 +12,13 @@ export default async function StaffPending() {
   const user = await requireUser();
   if (user.isStaff || user.needsTwoStep) redirect(user.needsTwoStep ? "/account/two-step?required=1" : "/ops");
   if (!user.staffStatus) redirect("/app");
+  const bureau = user.bureauId ? await db.bureau.findUnique({ where: { id: user.bureauId }, select: { name: true } }) : null;
   return (
     <>
       <h1>Payroll staff request</h1>
       {user.staffStatus === "PENDING" && (
         <>
-          <p className="notice">Thanks, {user.name.split(" ")[0] || user.name}. Your request is waiting for a White Oak administrator{user.staffRequestedAt ? ` (sent ${prettyDate(user.staffRequestedAt)})` : ""}.</p>
+          <p className="notice">Thanks, {user.name.split(" ")[0] || user.name}. Your request {bureau ? `to join ${bureau.name} ` : ""}is waiting for {bureau ? `${bureau.name}'s owner or a White Oak administrator` : "a White Oak administrator"}{user.staffRequestedAt ? ` (sent ${prettyDate(user.staffRequestedAt)})` : ""}.</p>
           <p className="muted">We&apos;ll email {user.email} when you&apos;re approved. Then sign in again and you&apos;ll set up two-step sign-in before you start.</p>
         </>
       )}

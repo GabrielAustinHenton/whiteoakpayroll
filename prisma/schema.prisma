@@ -102,9 +102,11 @@ model User {
   staffRequestNote String?
   staffDecidedAt   DateTime?
   staffDecidedById String?
-  /** The bureau (payroll firm) this staff member works for. Staff only see that bureau's companies. */
+  /** The bureau (payroll firm) this staff member works for, or the one they asked to join. Staff only see that bureau's companies. */
   bureauId         String?
   bureau           Bureau?  @relation(fields: [bureauId], references: [id], onDelete: SetNull)
+  /** Owner of their bureau (e.g. Jose): approves, denies and removes that bureau's staff. Set by an admin. */
+  bureauOwner      Boolean  @default(false)
   createdAt    DateTime     @default(now())
   memberships  Membership[]
   sessions     Session[]

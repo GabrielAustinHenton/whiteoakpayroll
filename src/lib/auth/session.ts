@@ -228,6 +228,18 @@ export async function requireWrite(companyId: string, area: Area) {
   return r;
 }
 
+/** A bureau owner (e.g. Jose): approved staff who manage their own bureau's staff. */
+export const ownsBureau = (user: Pick<CurrentUser, "isStaff" | "bureauOwner" | "bureauId">): boolean =>
+  user.isStaff && user.bureauOwner && Boolean(user.bureauId);
+
+/** Gate a page or action for whoever can decide staff requests: any admin, or a bureau owner. */
+export async function requireStaffManager(): Promise<CurrentUser> {
+  const user = await requireUser();
+  if (user.needsTwoStep) redirect("/account/two-step?required=1");
+  if (!user.isPlatformAdmin && !ownsBureau(user)) redirect("/app");
+  return user;
+}
+
 /** Gate a White Oak admin page. */
 export async function requireAdmin(): Promise<CurrentUser> {
   const user = await requireUser();

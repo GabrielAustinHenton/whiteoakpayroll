@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { isStaffUser } from "@/lib/auth/admins";
 import { roleIn, staffCovers, type CurrentUser } from "@/lib/auth/session";
 import { landingFor } from "@/lib/auth/landing";
-import { adminRecipients, canDecide } from "@/lib/app/staff-requests";
+import { adminRecipients, canDecide, canManageWorker } from "@/lib/app/staff-requests";
 
 const user = (o: Partial<CurrentUser>): CurrentUser =>
   ({ id: "u", email: "w@example.com", isStaff: false, isPlatformAdmin: false, bureauCompanyIds: [], memberships: [], ...o }) as CurrentUser;
@@ -59,5 +59,21 @@ describe("staff request decisions", () => {
     expect(landingFor({ ...base, staffStatus: "PENDING" })).toBe("/staff/pending");
     expect(landingFor({ ...base, staffStatus: "DENIED" })).toBe("/staff/pending");
     expect(landingFor({ ...base, staffStatus: null })).toBe("/app");
+  });
+});
+
+describe("bureau owners", () => {
+  const jose = { id: "jose", isPlatformAdmin: false, isStaff: true, bureauOwner: true, bureauId: "savagge" };
+  it("manage only their own bureau's staff, not themselves or another owner", () => {
+    expect(canManageWorker(jose, { id: "w", bureauId: "savagge", bureauOwner: false })).toBe(true);
+    expect(canManageWorker(jose, { id: "w", bureauId: "other", bureauOwner: false })).toBe(false);
+    expect(canManageWorker(jose, { id: "w", bureauId: null, bureauOwner: false })).toBe(false);
+    expect(canManageWorker(jose, { id: "jose", bureauId: "savagge", bureauOwner: true })).toBe(false);
+    expect(canManageWorker(jose, { id: "o2", bureauId: "savagge", bureauOwner: true })).toBe(false);
+  });
+  it("lose the power when not approved staff, while admins keep it everywhere", () => {
+    expect(canManageWorker({ ...jose, isStaff: false }, { id: "w", bureauId: "savagge", bureauOwner: false })).toBe(false);
+    expect(canManageWorker({ ...jose, bureauOwner: false }, { id: "w", bureauId: "savagge", bureauOwner: false })).toBe(false);
+    expect(canManageWorker({ id: "g", isPlatformAdmin: true, isStaff: false, bureauOwner: false, bureauId: null }, { id: "w", bureauId: "x", bureauOwner: true })).toBe(true);
   });
 });

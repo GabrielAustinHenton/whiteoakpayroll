@@ -15,20 +15,30 @@ export function adminRecipients(admins: { email: string }[], env: Record<string,
   return [...out];
 }
 
-/** Email every admin that someone is waiting for approval. Best effort. */
-export async function notifyAdminsOfRequest(worker: { name: string; email: string; note: string | null }): Promise<SendResult[]> {
-  const admins = await db.user.findMany({ where: { isPlatformAdmin: true }, select: { email: true } });
-  const url = `${appUrl()}/admin#staff-requests`;
+/**
+ * Email whoever can approve: every admin, plus the owners of the bureau they asked to join (who
+ * get a link to their own team page). Best effort.
+ */
+export async function notifyOfRequest(worker: { name: string; email: string; note: string | null }, bureau: { id: string; name: string } | null): Promise<SendResult[]> {
+  const [admins, owners] = await Promise.all([
+    db.user.findMany({ where: { isPlatformAdmin: true }, select: { email: true } }),
+    bureau ? db.user.findMany({ where: { bureauId: bureau.id, bureauOwner: true, staffStatus: "APPROVED" }, select: { email: true } }) : [],
+  ]);
+  const adminTo = adminRecipients(admins);
+  const to = [
+    ...adminTo.map((email) => ({ email, url: `${appUrl()}/admin#staff-requests` })),
+    ...owners.filter((o) => !adminTo.includes(o.email.toLowerCase())).map((o) => ({ email: o.email, url: `${appUrl()}/ops/team` })),
+  ];
   return Promise.all(
-    adminRecipients(admins).map((to) =>
+    to.map(({ email: to, url }) =>
       sendEmail(
         buttonEmail({
           to,
-          subject: `${worker.name} asked to join White Oak as payroll staff`,
+          subject: `${worker.name} asked to join ${bureau?.name ?? "White Oak"} as payroll staff`,
           lines: [
-            `${worker.name} (${worker.email}) asked to join White Oak Payroll as payroll staff.`,
+            `${worker.name} (${worker.email}) asked to join ${bureau ? bureau.name : "White Oak Payroll"} as payroll staff.`,
             ...(worker.note ? [`They wrote: "${worker.note}"`] : []),
-            "If you approve, they can open every managed client, enter employees and hours, and run payroll. Until then they have no access.",
+            `If you approve, they can open ${bureau ? `${bureau.name}'s` : "their bureau's"} clients, enter employees and hours, and run payroll. Until then they have no access.`,
           ],
           button: "Review the request",
           url,
@@ -88,4 +98,17 @@ export function canDecide(from: StaffStatus, to: "APPROVED" | "DENIED" | "REMOVE
   if (to === "APPROVED") return from !== "APPROVED";
   if (to === "DENIED") return from === "PENDING";
   return from === "APPROVED";
+}
+
+/**
+ * Whether a manager may decide on this person: admins on anyone; a bureau owner only on people in
+ * (or asking to join) their own bureau, never on themselves or another owner.
+ */
+export function canManageWorker(
+  manager: { id: string; isPlatformAdmin: boolean; isStaff: boolean; bureauOwner: boolean; bureauId: string | null },
+  worker: { id: string; bureauId: string | null; bureauOwner: boolean },
+): boolean {
+  if (manager.isPlatformAdmin) return true;
+  if (!manager.isStaff || !manager.bureauOwner || !manager.bureauId) return false;
+  return worker.id !== manager.id && !worker.bureauOwner && worker.bureauId === manager.bureauId;
 }

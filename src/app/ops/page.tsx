@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { requireStaff } from "@/lib/auth/session";
+import { ownsBureau, requireStaff } from "@/lib/auth/session";
 import { Field, Notice, StateSelect, messages, prettyDate } from "@/components/ui";
 import { FREQUENCY_LABEL, nextPeriod, type Frequency } from "@/lib/app/periods";
 import { testIdsOnly } from "@/lib/app/ids";
@@ -57,6 +57,7 @@ export default async function PayrollDesk({ searchParams }: { searchParams: Prom
         Signed in as {user.name}{bureau ? <> for <b>{bureau.name}</b></> : user.isPlatformAdmin ? " (admin: every bureau)" : ""}. Your clients,
         soonest payday first. Open a client to enter hours, approve, and print checks and paystubs.
       </p>
+      {ownsBureau(user) && <p><a href="/ops/team">Your staff and requests to join →</a></p>}
       <Notice error={error} ok={ok} />
       {noBureau && (
         <p className="notice" role="alert">You aren&apos;t assigned to a payroll bureau yet, so you can&apos;t see any clients. Ask a White Oak administrator to add you to your bureau.</p>

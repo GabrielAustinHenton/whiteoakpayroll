@@ -68,9 +68,14 @@ clients. Staff belong to one bureau and see **only that bureau's companies** on 
 1. Sign in as an admin, open https://whiteoakpayroll.com/admin, and under **Bureaus** add the bureau.
 2. Put each of the bureau's clients in it: click the company on /admin and choose the bureau under
    **Bureau**. Clients that the bureau's staff add from the payroll desk go into their bureau by themselves.
-3. Add staff, either way:
-   - **Ask and approve (recommended):** they open https://whiteoakpayroll.com/staff/join, create a login and
-     ask to join. Admins get an email. On /admin under **Payroll staff → Waiting for approval**, choose
+3. Optional: make the bureau's owner (for example Jose). Under **Bureaus → Make someone a bureau owner**,
+   enter their login email and choose the bureau. The owner sees only that bureau's companies and
+   approves, denies and removes its staff from **Payroll desk → Your staff** (`/ops/team`). They stop
+   being a White Oak admin: also take their email out of `ADMIN_EMAILS` in Vercel and redeploy.
+4. Add staff, either way:
+   - **Ask and approve (recommended):** send them the bureau's join link (shown under Bureaus and on the
+     owner's /ops/team page). They create a login and ask to join. Admins and the bureau's owner get an
+     email; the owner approves on /ops/team, or an admin on /admin. On /admin under **Payroll staff → Waiting for approval**, choose
      their bureau and click **Approve** (or **Deny**). They get an email and can sign in. Until approved
      they have no access. **Remove access** takes it away again.
    - **STAFF_EMAILS:** add the email in Vercel (comma separated), redeploy, then on /admin send the login
