@@ -129,6 +129,8 @@ model Company {
   timeSettings  TimeSettings?
   workLocations WorkLocation[]
   timeEntries   TimeEntry[]
+  timesheets    Timesheet[]
+  timeCorrections TimeCorrection[]
   filings       Filing[]
   invoices      Invoice[]
   auditLogs     AuditLog[]
@@ -200,6 +202,8 @@ model Employee {
   userId           String?      @unique
   user             User?        @relation(fields: [userId], references: [id])
   timeEntries      TimeEntry[]
+  timesheets       Timesheet[]
+  timeCorrections  TimeCorrection[]
   firstName        String
   lastName         String
   email            String
@@ -686,4 +690,54 @@ model TimeBreak {
   endAt      DateTime?
   startPunch Json?
   endPunch   Json?
+}
+
+/**
+ * A manager's approval of an employee's hours for a pay period (dates in the company's time zone).
+ * While approved, shifts in the period can't be changed; unapprove to fix them.
+ */
+model Timesheet {
+  id              String   @id @default(cuid())
+  companyId       String
+  company         Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employeeId      String
+  employee        Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  periodStart     String // YYYY-MM-DD
+  periodEnd       String
+  regularMinutes  Int
+  overtimeMinutes Int
+  approvedById    String
+  approvedAt      DateTime @default(now())
+
+  @@unique([employeeId, periodStart, periodEnd])
+  @@index([companyId, periodStart])
+}
+
+/**
+ * An employee's request to fix a missed punch, decided by a manager.
+ */
+model TimeCorrection {
+  id           String    @id @default(cuid())
+  companyId    String
+  company      Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employeeId   String
+  employee     Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  /**
+   * The shift to fix (e.g. a forgotten punch out); empty to add a missed shift.
+   */
+  entryId      String?
+  clockInAt    DateTime
+  clockOutAt   DateTime
+  mealMinutes  Int       @default(0)
+  reason       String
+  /**
+   * PENDING | APPROVED | DECLINED
+   */
+  status       String    @default("PENDING")
+  decidedById  String?
+  decidedAt    DateTime?
+  decisionNote String?
+  createdAt    DateTime  @default(now())
+
+  @@index([companyId, status])
 }

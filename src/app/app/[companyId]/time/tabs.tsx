@@ -4,6 +4,7 @@ export function TimeTabs({ companyId, manage }: { companyId: string; manage: boo
   return (
     <nav className="time-tabs small" aria-label="Time Tracking">
       <a href={base}>Timecards</a>
+      <a href={`${base}/timesheets`}>Timesheets</a>
       <a href={`${base}/locations`}>Work locations</a>
       {manage && <a href={`${base}/settings`}>Settings</a>}
     </nav>

@@ -136,3 +136,50 @@ describe("punch photos", () => {
     expect(decodePhoto(null)).toBeNull();
   });
 });
+
+import { mealWarning, periodHours, type Shift } from "@/lib/time/timesheet";
+
+describe("timesheets", () => {
+  const tz = "America/New_York";
+  // A 9:00 to 5:30 shift (ET) with a 30-minute lunch: 8 paid hours.
+  const day = (ymd: string, meal = 30, id = ymd): Shift => {
+    const inAt = new Date(`${ymd}T14:00:00Z`);
+    const outAt = new Date(`${ymd}T22:30:00Z`);
+    const breaks = meal ? [{ kind: "MEAL", startAt: new Date(`${ymd}T17:00:00Z`), endAt: new Date(new Date(`${ymd}T17:00:00Z`).getTime() + meal * 60_000) }] : [];
+    return { id, clockInAt: inAt, clockOutAt: outAt, breaks };
+  };
+  const opts = { timeZone: tz, weekStartsOn: 0, workState: "CT" };
+
+  it("pays over 40 in a workweek as overtime", () => {
+    // Mon to Sat, six 8-hour days = 48 hours: 40 regular, 8 overtime.
+    const shifts = ["2026-11-30", "2026-12-01", "2026-12-02", "2026-12-03", "2026-12-04", "2026-12-05"].map((d) => day(d));
+    const h = periodHours(shifts, { ...opts, periodStart: "2026-11-29", periodEnd: "2026-12-12" });
+    expect(h.regularMinutes).toBe(40 * 60);
+    expect(h.overtimeMinutes).toBe(8 * 60);
+    expect(h.byDay["2026-12-05"]).toBe(480);
+  });
+
+  it("counts hours from the part of the workweek before the pay period", () => {
+    // Workweek Sun Nov 29 to Sat Dec 5; period starts Thu Dec 3. Mon to Wed (24h) were last period.
+    const shifts = ["2026-11-30", "2026-12-01", "2026-12-02", "2026-12-03", "2026-12-04", "2026-12-05"].map((d) => day(d));
+    const h = periodHours(shifts, { ...opts, periodStart: "2026-12-03", periodEnd: "2026-12-16" });
+    expect(h.regularMinutes).toBe(16 * 60);
+    expect(h.overtimeMinutes).toBe(8 * 60);
+  });
+
+  it("doesn't count an open shift, and says so", () => {
+    const open = { ...day("2026-12-01"), clockOutAt: null };
+    const h = periodHours([day("2026-11-30"), open], { ...opts, periodStart: "2026-11-29", periodEnd: "2026-12-12" });
+    expect(h.regularMinutes).toBe(480);
+    expect(h.openShifts).toBe(1);
+    expect(h.warnings.join()).toMatch(/no punch out/);
+  });
+
+  it("warns about missing meal breaks by state", () => {
+    expect(mealWarning(day("2026-12-01", 0), "OR")).toMatch(/no meal break.*Oregon/);
+    expect(mealWarning(day("2026-12-01", 15), "MA")).toMatch(/only 15 minutes/);
+    expect(mealWarning(day("2026-12-01", 30), "NY")).toBeNull();
+    // 8.5 hours is over CT's 7.5.
+    expect(mealWarning(day("2026-12-01", 0), "CT")).toMatch(/Connecticut/);
+  });
+});
