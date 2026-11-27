@@ -3,7 +3,7 @@ import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import type { Role, ServiceMode } from "@prisma/client";
 import { db } from "../db";
-import { adminAllowed, isStaffEmail } from "./admins";
+import { adminAllowed, isStaffUser } from "./admins";
 
 const COOKIE = "wo_session";
 const DAYS = 14;
@@ -61,16 +61,25 @@ export async function currentUser() {
   const s = await db.session.findUnique({ where: { tokenHash: sha256(token) }, include: { user: { include: { memberships: true } } } });
   if (!s || s.mfaPending || s.expiresAt < new Date()) return null;
   // ADMIN_EMAILS, when set, is the allowlist: removing an email there revokes admin access at once.
-  // STAFF_EMAILS lists White Oak payroll staff (operators); a login with a password is required.
+  // STAFF_EMAILS lists White Oak payroll staff (operators), and admins can approve more at
+  // /admin (staffStatus APPROVED); a login with a password is required.
   const admin = s.user.isPlatformAdmin && adminAllowed(s.user.email);
-  const staff = Boolean(s.user.passwordHash) && isStaffEmail(s.user.email);
+  const staff = Boolean(s.user.passwordHash) && isStaffUser(s.user);
   // White Oak admins and staff can reach every client's SSNs and bank details, so until they turn
   // on two-step sign-in they get no White Oak access at all (only their own company, if any).
   const needsTwoStep = (admin || staff) && twoStepRequiredForStaff() && !s.user.totpEnabledAt;
+  const isStaff = staff && !needsTwoStep;
+  // Staff work only for their own bureau: they get the payroll role in that bureau's companies and
+  // nowhere else. Staff with no bureau see no client at all until an admin assigns one.
+  const bureauCompanyIds =
+    isStaff && s.user.bureauId
+      ? (await db.company.findMany({ where: { bureauId: s.user.bureauId }, select: { id: true } })).map((c) => c.id)
+      : [];
   return {
     ...s.user,
     isPlatformAdmin: admin && !needsTwoStep,
-    isStaff: staff && !needsTwoStep,
+    isStaff,
+    bureauCompanyIds,
     needsTwoStep,
   };
 }
@@ -127,14 +136,20 @@ export const ROLE_LABEL: Record<AppRole, string> = {
 
 /**
  * The caller's role in a company. An owner or HR membership wins (someone who also runs a company
- * uses it as its client); then White Oak payroll staff; then admins; else the membership role.
+ * uses it as its client); then payroll staff, only in their own bureau's companies; then admins;
+ * else the membership role.
  */
 export function roleIn(user: CurrentUser, companyId: string): AppRole | null {
   const m = user.memberships.find((x) => x.companyId === companyId)?.role ?? null;
   if (m === "CLIENT_OWNER" || m === "CLIENT_HR") return m;
-  if (user.isStaff) return "PAYROLL_OPERATOR";
+  if (user.isStaff && staffCovers(user, companyId)) return "PAYROLL_OPERATOR";
   if (user.isPlatformAdmin) return "PLATFORM_ADMIN";
   return m;
+}
+
+/** Whether a staff member's bureau runs this company. Admins are not staff and use their own role. */
+export function staffCovers(user: Pick<CurrentUser, "isStaff" | "bureauCompanyIds">, companyId: string): boolean {
+  return user.isStaff && user.bureauCompanyIds.includes(companyId);
 }
 
 /** Whether a role may use an area. Without a mode, the stricter MANAGED rules apply. */

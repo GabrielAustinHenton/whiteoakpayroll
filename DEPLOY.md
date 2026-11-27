@@ -59,16 +59,22 @@ Use Neon through Vercel; it is standard Postgres, so it can move later.
   in the admin bar (asks for a reason, lasts one hour). Every view and edit-mode start is logged.
 - To remove an admin, delete their email from `ADMIN_EMAILS` and redeploy.
 
-## Adding payroll staff (for example Olga)
+## Bureaus and payroll staff (for example Jose's bureau and Olga)
 
-Staff enter every client's data and run payroll from the **payroll desk** (`/ops`). They are not admins.
+A **bureau** is a payroll firm, such as a partner's service bureau, that runs payroll for its own
+clients. Staff belong to one bureau and see **only that bureau's companies** on the payroll desk
+(`/ops`). Companies with no bureau are White Oak's own: only admins can open them. Staff are not admins.
 
-1. In Vercel open **Settings → Environment Variables**, add `STAFF_EMAILS` with the staff email (several
-   are separated by commas), and redeploy.
-2. Sign in as an admin, open https://whiteoakpayroll.com/admin, find **Payroll staff**, type their name and
-   click **Send login invite**. If email isn't set up yet, the page shows the invite link: send it to them.
-3. They open the link, choose a password, and land on the payroll desk. To remove someone, delete their
-   email from `STAFF_EMAILS` and redeploy.
+1. Sign in as an admin, open https://whiteoakpayroll.com/admin, and under **Bureaus** add the bureau.
+2. Put each of the bureau's clients in it: click the company on /admin and choose the bureau under
+   **Bureau**. Clients that the bureau's staff add from the payroll desk go into their bureau by themselves.
+3. Add staff, either way:
+   - **Ask and approve (recommended):** they open https://whiteoakpayroll.com/staff/join, create a login and
+     ask to join. Admins get an email. On /admin under **Payroll staff → Waiting for approval**, choose
+     their bureau and click **Approve** (or **Deny**). They get an email and can sign in. Until approved
+     they have no access. **Remove access** takes it away again.
+   - **STAFF_EMAILS:** add the email in Vercel (comma separated), redeploy, then on /admin send the login
+     invite and choose their bureau next to their name. Staff with no bureau see no clients.
 
 ## Two-step sign-in (required for admins and staff)
 

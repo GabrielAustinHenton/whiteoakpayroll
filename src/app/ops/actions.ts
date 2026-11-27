@@ -21,6 +21,16 @@ export async function addClientCompany(form: FormData) {
   if (!legalName) back("/ops", { error: "Enter the company's legal name." });
   if (ein.error) back("/ops", { error: ein.error });
   if (!["CT", "MA", "OR", "NY"].includes(state)) back("/ops", { error: "Choose the company's state." });
+  // A client belongs to the bureau whose staff add it. Admins choose (or keep it White Oak's own).
+  let bureauId: string | null = null;
+  if (user.isPlatformAdmin) {
+    const picked = str(form.get("bureauId"));
+    if (picked && !(await db.bureau.findUnique({ where: { id: picked } }))) back("/ops", { error: "That bureau no longer exists." });
+    bureauId = picked || null;
+  } else {
+    if (!user.bureauId) back("/ops", { error: "You aren't assigned to a payroll bureau yet. Ask a White Oak administrator." });
+    bureauId = user.bureauId;
+  }
   const c = await db.company.create({
     data: {
       legalName,
@@ -31,9 +41,10 @@ export async function addClientCompany(form: FormData) {
       state,
       zip: str(form.get("zip")),
       serviceMode: "MANAGED",
+      bureauId,
     },
   });
-  await audit(user.id, c.id, "company.created_by_staff", { legalName, by: user.email });
+  await audit(user.id, c.id, "company.created_by_staff", { legalName, by: user.email, bureauId });
   redirect(`/app/${c.id}/settings?ok=${encodeURIComponent(`${legalName} created. Next: bank account, state tax accounts and a pay schedule, then add the employees.`)}`);
 }
 
