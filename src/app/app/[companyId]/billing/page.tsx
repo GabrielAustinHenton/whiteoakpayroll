@@ -30,7 +30,7 @@ export default async function Billing({ params, searchParams }: { params: Promis
         <p className="small muted">Prices are placeholders and no card is charged in preview.</p>
       </div>
       <h2>Add-ons</h2>
-      {([["TIME_TRACKING", "Time Tracking", "Punch in and out; hours flow into pay runs."], ["PTO", "PTO", "Paid time off policies and balances beyond required sick leave."]] as const).map(([k, name, desc]) => (
+      {([["TIME_TRACKING", "Time Tracking", "Employees punch in and out from their phones, only at work (geofenced), with breaks and optional photo; hours flow into pay runs."], ["PTO", "PTO", "Paid time off policies and balances beyond required sick leave."]] as const).map(([k, name, desc]) => (
         <div className="card" key={k}>
           <div className="actions">
             <b>{name}</b>

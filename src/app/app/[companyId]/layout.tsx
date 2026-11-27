@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { ROLE_LABEL, adminEditingCompany, canUse, requireUser, roleIn, type Area } from "@/lib/auth/session";
 import { logAdminView } from "@/lib/app/admin-view";
 import { startAdminEdit, stopAdminEdit } from "../../admin/actions";
+import { timeTrackingOn } from "@/lib/time/service";
 
 const NAV: { area: Area; href: string; label: string }[] = [
   { area: "dashboard", href: "", label: "Overview" },
@@ -28,6 +29,7 @@ export default async function CompanyLayout({ children, params }: { children: Re
   const isAdmin = role === "PLATFORM_ADMIN";
   const editing = isAdmin && (await adminEditingCompany()) === companyId;
   if (isAdmin) await logAdminView(user.id, companyId);
+  const timeOn = canUse(role, "reports") && (await timeTrackingOn(companyId));
   return (
     <>
     {isAdmin && (
@@ -61,6 +63,7 @@ export default async function CompanyLayout({ children, params }: { children: Re
         {NAV.filter((n) => canUse(role, n.area)).map((n) => (
           <a key={n.href} href={`/app/${companyId}${n.href}`}>{n.label}</a>
         ))}
+        {timeOn && <a href={`/app/${companyId}/time`}>Time Tracking</a>}
       </nav>
       <section>{children}</section>
     </div>

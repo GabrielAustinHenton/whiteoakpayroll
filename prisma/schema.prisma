@@ -108,6 +108,9 @@ model Company {
   contractors   Contractor[]
   payRuns       PayRun[]
   modules       CompanyModule[]
+  timeSettings  TimeSettings?
+  workLocations WorkLocation[]
+  timeEntries   TimeEntry[]
   filings       Filing[]
   invoices      Invoice[]
   auditLogs     AuditLog[]
@@ -177,6 +180,7 @@ model Employee {
   /** Portal login, created when the employee is invited. */
   userId           String?      @unique
   user             User?        @relation(fields: [userId], references: [id])
+  timeEntries      TimeEntry[]
   firstName        String
   lastName         String
   email            String
@@ -391,4 +395,98 @@ model Check {
   createdAt           DateTime           @default(now())
 
   @@unique([companyId, number])
+}
+
+/* ---------- Time Tracking add-on ---------- */
+
+/** What happens to a punch made away from every work location. */
+enum GeofenceMode {
+  BLOCK // refused: the employee must be at work to punch
+  FLAG // allowed, and flagged for the manager to review
+  OFF // location is recorded when the phone shares it, but not checked
+}
+
+enum PunchSource {
+  PHONE // the employee's own phone or computer, signed in
+  KIOSK // a shared tablet at the work site
+  MANAGER // added or fixed by a manager
+}
+
+/** Time Tracking settings, one row per company (created with defaults on first use). */
+model TimeSettings {
+  id                String       @id @default(cuid())
+  companyId         String       @unique
+  company           Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  geofenceMode      GeofenceMode @default(BLOCK)
+  /** GPS fixes less precise than this many meters are flagged as low accuracy. */
+  maxAccuracyMeters Int          @default(100)
+  /** Ask for a selfie at each punch, so a coworker can't punch for someone else. */
+  requirePhoto      Boolean      @default(false)
+  /** IANA time zone for workdays and workweeks, e.g. America/New_York. */
+  timeZone          String       @default("America/New_York")
+  /** First day of the fixed 7-day workweek used for overtime: 0 = Sunday ... 6 = Saturday. */
+  weekStartsOn      Int          @default(0)
+  updatedAt         DateTime     @updatedAt
+}
+
+/** A place employees work. Punches count as "at work" inside its radius. */
+model WorkLocation {
+  id           String      @id @default(cuid())
+  companyId    String
+  company      Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name         String
+  address      String?
+  latitude     Float
+  longitude    Float
+  radiusMeters Int         @default(150)
+  active       Boolean     @default(true)
+  createdAt    DateTime    @default(now())
+  entries      TimeEntry[]
+
+  @@index([companyId])
+}
+
+/**
+ * One shift: a punch in and (once they leave) a punch out, with breaks. Location is captured only
+ * at the moment of each punch. inPunch/outPunch hold what was checked: coordinates, accuracy,
+ * distance to the nearest work location, the fix time and the device (see src/lib/time/geofence.ts).
+ */
+model TimeEntry {
+  id          String        @id @default(cuid())
+  companyId   String
+  company     Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  employeeId  String
+  employee    Employee      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  locationId  String?
+  location    WorkLocation? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  clockInAt   DateTime
+  clockOutAt  DateTime?
+  source      PunchSource   @default(PHONE)
+  inPunch     Json
+  outPunch    Json?
+  /** Review flags, e.g. OUTSIDE_FENCE, LOW_ACCURACY, NO_LOCATION (src/lib/time/flags.ts). */
+  flags       String[]      @default([])
+  /** Optional selfies (small JPEGs) when the company asks for a photo at punch. */
+  inPhoto     Bytes?
+  outPhoto    Bytes?
+  note        String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  breaks      TimeBreak[]
+
+  @@index([companyId, clockInAt])
+  @@index([employeeId, clockInAt])
+}
+
+/** A break inside a shift. Meal breaks are unpaid; short rest breaks are paid. */
+model TimeBreak {
+  id         String    @id @default(cuid())
+  entryId    String
+  entry      TimeEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  /** MEAL (unpaid) or REST (paid). */
+  kind       String    @default("MEAL")
+  startAt    DateTime
+  endAt      DateTime?
+  startPunch Json?
+  endPunch   Json?
 }

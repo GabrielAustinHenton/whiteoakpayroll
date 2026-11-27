@@ -27,6 +27,7 @@ Next.js (App Router, TypeScript), PostgreSQL with Prisma, Vitest. Tax calculatio
 | `src/app/signup`, `login`, `app/[companyId]/…` | The payroll app: self-serve signup, company settings, people (employees, contractors, W-4 and state forms, I-9, offboarding), pay runs (review, approve, paystubs, paper checks), tax filings archive, advances, team access, billing |
 | `src/app/me`, `src/app/admin` | Employee portal (paystubs, W-2s, advances) and White Oak admin |
 | `src/lib/app/` | App services: engine adapter (`engine.ts`), pay periods, pay runs and checks (`payroll-service.ts`), completed forms (`filing-docs.ts`), paystubs |
+| `src/lib/time/`, `src/app/me/clock`, `src/app/app/[companyId]/time` | Time Tracking add-on: geofenced punch in/out from the phone (`/me/clock`), breaks, optional selfie, work locations on a map, timecards and blocked punch attempts |
 | `src/lib/pdf/` | PDF rendering for completed forms, paystubs and voucher checks |
 | `src/lib/auth/` | Password hashing and database sessions; roles: White Oak admin, client owner, client HR (onboard/offboard only), employee |
 

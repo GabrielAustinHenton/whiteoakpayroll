@@ -4,6 +4,7 @@ import { Field, Notice, messages, prettyDate, usd } from "@/components/ui";
 import { canOfferAdvance } from "@/lib/payroll/advances";
 import type { LaunchState } from "@/lib/payroll/schedules";
 import { requestAdvance } from "./actions";
+import { timeTrackingOn } from "@/lib/time/service";
 
 export default async function Me({ searchParams }: { searchParams: Promise<Record<string, string>> }) {
   const user = await requireUser();
@@ -23,10 +24,12 @@ export default async function Me({ searchParams }: { searchParams: Promise<Recor
   const w2s = await db.filing.findMany({ where: { companyId: e.companyId, form: "W-2" }, select: { id: true, period: true, data: true } });
   const mine = w2s.filter((f) => (f.data as { employeeId?: string }).employeeId === e.id);
   const advancesOk = canOfferAdvance(e.workState as LaunchState);
+  const clockOn = e.status !== "TERMINATED" && (await timeTrackingOn(e.companyId));
   return (
     <>
       <h1>My pay · {e.company.tradeName ?? e.company.legalName}</h1>
       <Notice error={error} ok={ok} />
+      {clockOn && <p><a href="/me/clock"><button type="button">Open time clock</button></a></p>}
       <h2>Paystubs</h2>
       {e.payRunLines.length === 0 ? <p className="muted">No paychecks yet.</p> : (
         <table>
