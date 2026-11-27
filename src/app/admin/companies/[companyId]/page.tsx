@@ -3,16 +3,19 @@ import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth/session";
 import { companyBilling } from "@/lib/app/admin-metrics";
 import { logAdminView } from "@/lib/app/admin-view";
-import { PRICING, type AddOnKey } from "@/lib/pricing";
-import { prettyDate, usd } from "@/components/ui";
+import { PRICING, priceLabel, type AddOnKey } from "@/lib/pricing";
+import { Notice, messages, prettyDate, usd } from "@/components/ui";
+import { FEATURES, FEATURE_KEYS, MODE_LABEL, featuresFor } from "@/lib/app/features";
+import { setServiceMode } from "../../actions";
 
 export const dynamic = "force-dynamic";
 
 const ROLE = { CLIENT_OWNER: "Owner", CLIENT_HR: "HR", EMPLOYEE: "Employee", PLATFORM_ADMIN: "Admin" } as const;
 const FREQ = { WEEKLY: "Weekly", BIWEEKLY: "Every 2 weeks", SEMIMONTHLY: "Twice a month", MONTHLY: "Monthly" } as const;
 
-export default async function AdminCompany({ params }: { params: Promise<{ companyId: string }> }) {
+export default async function AdminCompany({ params, searchParams }: { params: Promise<{ companyId: string }>; searchParams: Promise<Record<string, string>> }) {
   const user = await requireAdmin();
+  const { error, ok } = await messages(searchParams);
   const { companyId } = await params;
   const c = await db.company.findUnique({
     where: { id: companyId },
@@ -66,12 +69,22 @@ export default async function AdminCompany({ params }: { params: Promise<{ compa
       <h2>Subscription</h2>
       <table>
         <tbody>
-          <tr><td>Base plan</td><td>{usd(PRICING.pricePerTier)} per 5 people paid in the month</td><td className="num">{usd(bill.projected.basePrice)}</td></tr>
+          <tr><td>Base plan</td><td>{priceLabel()}, people paid in the month</td><td className="num">{usd(bill.projected.basePrice)}</td></tr>
           {bill.projected.addOns.map((a) => <tr key={a.key}><td>Add-on</td><td>{a.name}</td><td className="num">{usd(a.price)}</td></tr>)}
           {!bill.projected.addOns.length && <tr><td>Add-ons</td><td className="muted">None</td><td /></tr>}
           <tr><th colSpan={2}>Monthly total</th><th className="num">{usd(bill.projected.total)}</th></tr>
         </tbody>
       </table>
+
+      <h2>Service</h2>
+      <Notice error={error} ok={ok} />
+      <p>{MODE_LABEL[c.serviceMode]}. Features on: {FEATURE_KEYS.filter((k) => featuresFor(c)[k]).map((k) => FEATURES[k].label).join(", ") || "none"}.</p>
+      <form action={setServiceMode} className="actions">
+        <input type="hidden" name="companyId" value={c.id} />
+        <input type="hidden" name="serviceMode" value={c.serviceMode === "MANAGED" ? "SELF_SERVE" : "MANAGED"} />
+        <button type="submit" className="secondary">{c.serviceMode === "MANAGED" ? "Switch to self-serve" : "Switch to managed by the payroll desk"}</button>
+        <span className="small muted">Switching resets the company&apos;s feature switches to that mode&apos;s defaults.</span>
+      </form>
 
       <h2>Company settings</h2>
       <table>

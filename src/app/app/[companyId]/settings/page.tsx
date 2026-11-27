@@ -1,8 +1,10 @@
 import { db } from "@/lib/db";
 import { requireArea } from "@/lib/auth/session";
-import { Field, Notice, StateSelect, dateStr, messages, prettyDate } from "@/components/ui";
+import { Field, Notice, messages, prettyDate } from "@/components/ui";
 import { FREQUENCY_LABEL, type Frequency } from "@/lib/app/periods";
-import { createSchedule, setNextCheckNumber, updateBank, updateCompany, upsertStateAccount } from "../actions";
+import { FEATURES, FEATURE_KEYS, MODE_LABEL, featuresFor } from "@/lib/app/features";
+import { setNextCheckNumber, updateFeatures } from "../actions";
+import { BankForm, CompanyForm, ScheduleForm, StateAccountForm } from "./forms";
 
 export default async function Settings({ params, searchParams }: { params: Promise<{ companyId: string }>; searchParams: Promise<Record<string, string>> }) {
   const { companyId } = await params;
@@ -10,6 +12,7 @@ export default async function Settings({ params, searchParams }: { params: Promi
   const { error, ok } = await messages(searchParams);
   const c = await db.company.findUniqueOrThrow({ where: { id: companyId }, include: { stateAccounts: true, paySchedules: true } });
   const hidden = <input type="hidden" name="companyId" value={companyId} />;
+  const features = featuresFor(c);
 
   return (
     <>
@@ -17,41 +20,13 @@ export default async function Settings({ params, searchParams }: { params: Promi
       <Notice error={error} ok={ok} />
 
       <h2>Company</h2>
-      <form action={updateCompany} className="form">
-        {hidden}
-        <div className="row">
-          <Field label="Legal name"><input name="legalName" defaultValue={c.legalName} required /></Field>
-          <Field label="Doing business as"><input name="tradeName" defaultValue={c.tradeName ?? ""} /></Field>
-          <Field label="EIN"><input name="ein" defaultValue={c.ein} required /></Field>
-        </div>
-        <Field label="Street address"><input name="addressLine1" defaultValue={c.addressLine1} required /></Field>
-        <div className="row">
-          <Field label="City"><input name="city" defaultValue={c.city} required /></Field>
-          <Field label="State"><StateSelect name="state" defaultValue={c.state} /></Field>
-          <Field label="ZIP"><input name="zip" defaultValue={c.zip} required /></Field>
-        </div>
-        <Field label="Federal deposit schedule" hint="Most new employers are monthly depositors. The IRS tells you each year in Notice 931 / your lookback period.">
-          <select name="depositSchedule" defaultValue={c.depositSchedule}>
-            <option value="MONTHLY">Monthly</option>
-            <option value="SEMIWEEKLY">Semi-weekly</option>
-          </select>
-        </Field>
-        <button type="submit">Save company</button>
-      </form>
+      <CompanyForm companyId={companyId} c={c} />
 
       <h2 id="bank">Funding bank account</h2>
       <p className="muted small">
         Payroll and taxes are drawn from this account. {c.bankLast4 ? <>On file: {c.bankName} ending {c.bankLast4}.</> : "Not added yet."} Transfers are simulated until the TD Bank connection is live, and only the last 4 digits are stored.
       </p>
-      <form action={updateBank} className="form">
-        {hidden}
-        <div className="row">
-          <Field label="Bank name"><input name="bankName" defaultValue={c.bankName ?? ""} /></Field>
-          <Field label="Routing number"><input name="routing" inputMode="numeric" required pattern="\d{9}" /></Field>
-          <Field label="Account number"><input name="account" inputMode="numeric" required /></Field>
-        </div>
-        <button type="submit">Save bank account</button>
-      </form>
+      <BankForm companyId={companyId} c={c} />
 
       <h2 id="checks">Paper checks</h2>
       <p className="muted small">For anyone paid by check, White Oak numbers and prints checks on blank voucher check stock from your bank or office supply store (the kind with your bank's MICR line already printed). Next check number: <b>{c.nextCheckNumber}</b>.</p>
@@ -81,24 +56,7 @@ export default async function Settings({ params, searchParams }: { params: Promi
           </table>
         </div>
       )}
-      <form action={upsertStateAccount} className="form">
-        {hidden}
-        <div className="row">
-          <Field label="State"><StateSelect name="state" /></Field>
-          <Field label="Withholding account no." hint="CT Tax Reg., MA account, OR BIN, NY withholding ID"><input name="withholdingAccount" /></Field>
-          <Field label="Unemployment account no."><input name="unemploymentAccount" /></Field>
-          <Field label="UI rate (%)" hint="e.g. 2.4"><input name="suiRatePct" inputMode="decimal" required /></Field>
-        </div>
-        <Field label="Oregon only: work site transit district" hint="Portland metro is TriMet; Eugene/Springfield is Lane Transit District.">
-          <select name="orTransitDistrict" defaultValue="">
-            <option value="">None</option>
-            <option value="trimet">TriMet</option>
-            <option value="lane">Lane Transit District</option>
-          </select>
-        </Field>
-        <label className="check"><input type="checkbox" name="lessFrequentPayApproval" /> Connecticut only: we have Labor Commissioner approval to pay less often than every two weeks</label>
-        <button type="submit">Save state account</button>
-      </form>
+      <StateAccountForm companyId={companyId} />
 
       <h2 id="schedules">Pay schedules</h2>
       {c.paySchedules.length > 0 && (
@@ -108,20 +66,19 @@ export default async function Settings({ params, searchParams }: { params: Promi
           ))}
         </ul>
       )}
-      <form action={createSchedule} className="form">
+      <ScheduleForm companyId={companyId} first={c.paySchedules.length === 0} />
+
+      <h2 id="features">Features</h2>
+      <p className="muted small">Service: {MODE_LABEL[c.serviceMode]}. Turn on only what your team uses.</p>
+      <form action={updateFeatures} className="form">
         {hidden}
-        <div className="row">
-          <Field label="Name"><input name="name" defaultValue={c.paySchedules.length ? "" : "Regular"} required /></Field>
-          <Field label="How often">
-            <select name="frequency" defaultValue="BIWEEKLY">
-              {Object.entries(FREQUENCY_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-            </select>
-          </Field>
-          <Field label="First payday"><input type="date" name="anchorPayday" required defaultValue={dateStr(new Date(Date.now() + 7 * 86_400_000))} /></Field>
-          <Field label="Days from period end to payday" hint="Weekly / every two weeks only"><input name="payLagDays" type="number" min={0} max={14} defaultValue={5} /></Field>
-        </div>
-        <p className="small muted">CT and MA hourly staff must be paid weekly or every two weeks; NY manual workers weekly; NY never monthly.</p>
-        <button type="submit">Create schedule</button>
+        {FEATURE_KEYS.map((k) => (
+          <label className="check" key={k}>
+            <input type="checkbox" name={k} defaultChecked={features[k]} />
+            <span><b>{FEATURES[k].label}</b><br /><span className="small muted">{FEATURES[k].help}</span></span>
+          </label>
+        ))}
+        <button type="submit" className="secondary">Save features</button>
       </form>
     </>
   );

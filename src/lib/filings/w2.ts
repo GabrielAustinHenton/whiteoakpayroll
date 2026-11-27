@@ -58,7 +58,7 @@ export interface W2 {
   box6_medicareTax: Cents;
   box7_ssTips: Cents;
   box10_dependentCare: Cents;
-  box12: Partial<Record<"D" | "W" | "AA" | "DD", Cents>>;
+  box12: Partial<Record<"D" | "S" | "W" | "AA" | "DD", Cents>>;
   box13_retirementPlan: boolean;
   /** Box 14 other: e.g. "CT PFL", "NY PFL", "NY DBL", "OR STT". */
   box14: Record<string, Cents>;
@@ -100,10 +100,13 @@ export function buildW2s(all: PaycheckRecord[], year: number, employer: Employer
     }
     const d = sumDeductions(recs, "retirement_pretax");
     const aa = sumDeductions(recs, "retirement_roth");
+    // SIMPLE IRA deferrals: code S (reported on the EFW2 RO record, which is not written yet).
+    const simple = sumDeductions(recs, "simple_ira");
     const w = sumDeductions(recs, "hsa_section125");
     const box12: W2["box12"] = {};
     if (d) box12.D = d;
     if (aa) box12.AA = aa;
+    if (simple) box12.S = simple;
     if (w) box12.W = w;
     out.push({
       year,
@@ -117,7 +120,7 @@ export function buildW2s(all: PaycheckRecord[], year: number, employer: Employer
       box7_ssTips: 0,
       box10_dependentCare: sumDeductions(recs, "dependent_care_fsa"),
       box12,
-      box13_retirementPlan: d + aa > 0,
+      box13_retirementPlan: d + aa + simple > 0 || recs.some((r) => (r.employerRetirement ?? 0) > 0),
       box14,
       states,
       locals,

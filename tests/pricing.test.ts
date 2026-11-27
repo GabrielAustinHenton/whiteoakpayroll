@@ -14,8 +14,8 @@ describe("tier pricing", () => {
     const bill = monthlyBill(72);
     expect(bill.tier).toBe(15);
     expect(bill.tierRange).toEqual({ from: 71, to: 75 });
-    expect(bill.basePrice).toBe(37_500);
-    expect(bill.total).toBe(37_500);
+    expect(bill.basePrice).toBe(31_000); // $30 + 14 x $20
+    expect(bill.total).toBe(31_000);
   });
 
   it("adds each add-on once as a flat line", () => {
