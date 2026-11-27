@@ -9,6 +9,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { normalizeEin } from "@/lib/app/ids";
 import { audit } from "@/lib/app/payroll-service";
 import { invitePending, userForInvite } from "@/lib/app/invites";
+import { requestPasswordReset, userForReset } from "@/lib/app/password-reset";
 import { str } from "@/components/ui";
 
 const back = (path: string, error: string) => redirect(`${path}?error=${encodeURIComponent(error)}`);
@@ -43,7 +44,7 @@ export async function signup(form: FormData) {
   });
   await audit(user.id, company.id, "company.signup", { legalName });
   await startSession(user.id);
-  redirect(`/app/${company.id}`);
+  redirect(`/app/${company.id}/setup`);
 }
 
 export async function login(form: FormData) {
@@ -75,6 +76,31 @@ export async function acceptInvite(form: FormData) {
   if (isStaffEmail(user!.email)) redirect("/ops");
   if (user!.memberships.some((m) => m.role !== "EMPLOYEE")) redirect("/app");
   redirect(user!.employee ? "/me" : "/app");
+}
+
+/** "Forgot password": always the same answer, whether or not the email has an account. */
+export async function forgotPassword(form: FormData) {
+  await requestPasswordReset(str(form.get("email")));
+  redirect("/forgot?sent=1");
+}
+
+/** Choose a new password from an emailed reset link. Signs out every other session. */
+export async function resetPassword(form: FormData) {
+  const token = str(form.get("token"));
+  const here = `/reset/${encodeURIComponent(token)}`;
+  const password = String(form.get("password") ?? "");
+  const user = await userForReset(token);
+  if (!user) back(here, "This reset link has expired or was already used. Ask for a new one.");
+  const pw = passwordProblem(password);
+  if (pw) back(here, pw);
+  if (password !== String(form.get("confirm") ?? "")) back(here, "The two passwords don't match.");
+  await db.$transaction([
+    db.user.update({ where: { id: user!.id }, data: { passwordHash: hashPassword(password), resetTokenHash: null, resetExpiresAt: null } }),
+    db.session.deleteMany({ where: { userId: user!.id } }),
+  ]);
+  await audit(user!.id, null, "password.reset");
+  await startSession(user!.id);
+  redirect("/app?ok=Password+changed");
 }
 
 export async function logout() {

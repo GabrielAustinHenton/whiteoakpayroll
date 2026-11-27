@@ -68,15 +68,18 @@ export function decryptField(stored: string, ring: Keyring = keyring()): string 
 /** The key id a stored value was written with (to find rows that need re-encrypting after rotation). */
 export const encryptedKeyId = (stored: string) => stored.split(":")[1];
 
-/** Everything the app stores for an SSN: ciphertext plus the last 4 for display. */
-export function protectSsn(ssn: string, ring?: Keyring): { ssnEncrypted: string; ssnLast4: string; ssn: null } {
-  return { ssnEncrypted: encryptField(ssn, ring), ssnLast4: ssn.replace(/\D/g, "").slice(-4), ssn: null };
+/** Masked form kept in the plain `ssn` column for display and "has an SSN" checks. */
+export const maskSsn = (ssn: string) => `***-**-${ssn.replace(/\D/g, "").slice(-4)}`;
+
+/** Everything the app stores for an SSN: ciphertext, plus the masked form in the `ssn` column. */
+export function protectSsn(ssn: string, ring?: Keyring): { ssnEncrypted: string; ssn: string } {
+  return { ssnEncrypted: encryptField(ssn, ring), ssn: maskSsn(ssn) };
 }
 
-/** Full SSN for filings only. Falls back to the legacy plaintext column (test SSNs from before encryption). */
+/** Full SSN for filings only. Falls back to the `ssn` column for rows saved before encryption (test SSNs). */
 export function revealSsn(e: { ssnEncrypted?: string | null; ssn?: string | null }, ring?: Keyring): string {
   if (e.ssnEncrypted) return decryptField(e.ssnEncrypted, ring);
   return e.ssn ?? "";
 }
 
-export const ssnLast4 = (e: { ssnLast4?: string | null; ssn?: string | null }) => e.ssnLast4 ?? (e.ssn ?? "").replace(/\D/g, "").slice(-4);
+export const ssnLast4 = (e: { ssn?: string | null }) => (e.ssn ?? "").replace(/\D/g, "").slice(-4);

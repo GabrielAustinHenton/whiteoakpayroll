@@ -49,11 +49,12 @@ standing, with copies kept of every document.
 
 ## What is stored today
 
-- **SSNs are encrypted** with AES-256-GCM (`src/lib/security/field-crypto.ts`). The employee row keeps
-  `ssnEncrypted` and `ssnLast4`; the old plaintext `ssn` column is null for new saves and only read as
-  a fallback for test rows created before this change. The full SSN is decrypted only when building
-  filings. Set `FIELD_ENCRYPTION_KEY` before turning off `TEST_IDS_ONLY`; without a key the app uses a
-  fixed preview key that is only allowed while test SSNs are enforced.
+- **SSNs are encrypted** with AES-256-GCM (`src/lib/security/field-crypto.ts`) in `ssnEncrypted`.
+  The plain `ssn` column keeps only a masked value (`***-**-1234`), or `""` until a
+  self-onboarding employee enters it, so "has an SSN" checks keep working. Rows saved before this
+  change may still hold a full test SSN there. The full SSN is decrypted only when building
+  filings. Set `FIELD_ENCRYPTION_KEY` before turning off `TEST_IDS_ONLY`; without a key the app
+  uses a fixed preview key that is only allowed while test SSNs are enforced.
 - **Form history**: each save that changes the W-4 or the state certificate adds a new
   `W4Certificate` / `StateWithholdingCertificate` row and marks the previous one superseded.
 - **I-9**: `I9Record` tracks Section 1 and Section 2 completion, the Section 2 due date, the

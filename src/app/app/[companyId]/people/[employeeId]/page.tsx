@@ -3,17 +3,22 @@ import { db } from "@/lib/db";
 import { requireArea } from "@/lib/auth/session";
 import { Field, Notice, dateStr, messages, prettyDate } from "@/components/ui";
 import { EmployeeForm } from "../employee-form";
+import { completeI9, rehireEmployee, resendEmployeeInvite, terminateEmployee, updateEmployee } from "../../actions";
+import { i9Deadlines } from "@/lib/onboarding/i9";
 import { onboardingTasks, stateCertificateDuties } from "@/lib/onboarding";
 import type { LaunchState } from "@/lib/tax-engine/state";
-import { rehireEmployee, terminateEmployee, updateEmployee } from "../../actions";
+import { loginStatus } from "@/lib/app/invites";
 
 export default async function EmployeePage({ params, searchParams }: { params: Promise<{ companyId: string; employeeId: string }>; searchParams: Promise<Record<string, string>> }) {
   const { companyId, employeeId } = await params;
   await requireArea(companyId, "people");
   const { error, ok } = await messages(searchParams);
-  const e = await db.employee.findFirst({ where: { id: employeeId, companyId } });
+  const e = await db.employee.findFirst({ where: { id: employeeId, companyId }, include: { user: true } });
   if (!e) notFound();
   const schedules = await db.paySchedule.findMany({ where: { companyId } });
+  const waiting = !!e.selfOnboardingInvitedAt && !e.selfOnboardingDoneAt && e.status !== "TERMINATED";
+  const needsI9 = !!e.selfOnboardingDoneAt && !e.i9CompletedAt && e.status !== "TERMINATED";
+  const s1 = e.i9Section1 as Record<string, unknown> | null;
   const [latestW4, stateCert, i9] = await Promise.all([
     db.w4Certificate.findFirst({ where: { employeeId, supersededAt: null }, orderBy: { createdAt: "desc" } }),
     db.stateWithholdingCertificate.findFirst({ where: { employeeId, state: e.workState, supersededAt: null }, orderBy: { createdAt: "desc" } }),
@@ -23,13 +28,14 @@ export default async function EmployeePage({ params, searchParams }: { params: P
   const done: Record<string, boolean> = {
     w4: !!latestW4,
     state_w4: !!stateCert,
-    i9_section1: !!i9?.section1CompletedAt,
-    i9_section2: !!i9?.section2CompletedAt,
+    i9_section1: !!i9?.section1CompletedAt || !!e.selfOnboardingDoneAt || !!e.i9CompletedAt,
+    i9_section2: !!i9?.section2CompletedAt || !!e.i9CompletedAt,
     new_hire_report: false,
   };
   const tasks = e.status === "TERMINATED" ? [] : onboardingTasks({ firstDay: dateStr(i9?.firstDayOfEmployment ?? e.hireDate), workState: ws });
+  const sd = (stateCert?.data ?? {}) as Record<string, unknown>;
   const duties = stateCert && ws === "NY"
-    ? stateCertificateDuties({ state: "NY", form: { status: "single_or_hoh", nycResident: false, yonkersResident: false, line1: Number((stateCert.data as Record<string, unknown>).allowances ?? 0), line2: Number((stateCert.data as Record<string, unknown>).nycAllowances ?? 0), additionalState: 0, additionalNyc: 0, additionalYonkers: 0, signature: { name: "on file", signedAt: "" } } }, { receivedOn: dateStr(stateCert.createdAt) })
+    ? stateCertificateDuties({ state: "NY", form: { status: "single_or_hoh", nycResident: false, yonkersResident: false, line1: Number(sd.allowances ?? 0), line2: Number(sd.nycAllowances ?? 0), additionalState: 0, additionalNyc: 0, additionalYonkers: 0, signature: { name: "on file", signedAt: "" } } }, { receivedOn: dateStr(stateCert.createdAt) })
     : [];
   const hidden = (
     <>
@@ -47,6 +53,25 @@ export default async function EmployeePage({ params, searchParams }: { params: P
           <form action={rehireEmployee}>{hidden}<button type="submit" className="secondary">Rehire</button></form>
         </div>
       ) : null}
+      {waiting && (
+        <div className="card">
+          <p><b>Waiting on {e.firstName}</b> to enter their SSN, address, W-4, state form, bank account and I-9 Section 1. Portal login: {loginStatus(e.user).label}.</p>
+          <p className="small muted">They aren&apos;t on pay runs until they finish. You can change their job and pay below meanwhile.</p>
+          <form action={resendEmployeeInvite}>{hidden}<button type="submit" className="secondary">Resend the email</button></form>
+        </div>
+      )}
+      {needsI9 && (
+        <div className="card">
+          <p><b>{e.firstName} finished their part.</b> Now complete I-9 Section 2 by <b>{prettyDate(new Date(`${i9Deadlines(dateStr(e.hireDate)).section2}T00:00:00Z`))}</b>: look at their original documents in person (one from List A, or one from List B and one from List C).</p>
+          {s1 && <p className="small">Section 1 signed by {String(s1.signature ?? "")} on {String(s1.signedAt ?? "").slice(0, 10)}: {String(s1.statusLabel ?? s1.status ?? "")}.</p>}
+          <form action={completeI9} className="form">
+            {hidden}
+            <Field label="Documents examined" hint="e.g. U.S. passport; or driver's license + Social Security card"><input name="documents" required /></Field>
+            <label className="check"><input type="checkbox" name="examined" required /> I examined the original documents and they appear genuine and relate to this person.</label>
+            <button type="submit">Complete I-9 and activate</button>
+          </form>
+        </div>
+      )}
       {tasks.length > 0 && (
         <div className="card">
           <h2>Onboarding forms</h2>
@@ -63,7 +88,7 @@ export default async function EmployeePage({ params, searchParams }: { params: P
         </div>
       )}
       {i9?.retainUntil && <p className="small muted">Keep their Form I-9 until {dateStr(i9.retainUntil)}, then destroy it.</p>}
-      <EmployeeForm companyId={companyId} schedules={schedules} e={e} action={updateEmployee} submit="Save changes" latestW4={latestW4?.data} i9={i9} />
+      <EmployeeForm companyId={companyId} schedules={schedules} e={e} action={updateEmployee} submit="Save changes" quick={waiting} latestW4={latestW4?.data} />
       {e.status !== "TERMINATED" && (
         <>
           <h2>Offboard</h2>

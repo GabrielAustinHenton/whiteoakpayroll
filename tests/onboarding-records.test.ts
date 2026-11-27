@@ -34,12 +34,13 @@ describe("field encryption", () => {
     expect(keyring({}).currentId).toBe("dev");
   });
 
-  it("stores ciphertext plus last 4 and clears the plaintext column", () => {
+  it("stores ciphertext and only a masked SSN in the plain column", () => {
     const p = protectSsn("000-12-3456", ring);
-    expect(p).toMatchObject({ ssnLast4: "3456", ssn: null });
+    expect(p.ssn).toBe("***-**-3456");
     expect(revealSsn(p, ring)).toBe("000-12-3456");
+    // Rows saved before encryption keep a full test SSN in the plain column.
     expect(revealSsn({ ssn: "000-11-2222" }, ring)).toBe("000-11-2222");
-    expect(ssnLast4({ ssn: "000-11-2222" })).toBe("2222");
+    expect(ssnLast4(p)).toBe("3456");
   });
 });
 

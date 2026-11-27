@@ -1,8 +1,6 @@
 -- Encrypted SSNs and onboarding form history (W-4, state certificates, I-9 dates).
 
-ALTER TABLE "Employee" ALTER COLUMN "ssn" DROP NOT NULL;
 ALTER TABLE "Employee" ADD COLUMN "ssnEncrypted" TEXT;
-ALTER TABLE "Employee" ADD COLUMN "ssnLast4" TEXT;
 ALTER TABLE "Employee" ADD COLUMN "offerAcceptedAt" TIMESTAMP(3);
 
 CREATE TABLE "W4Certificate" (

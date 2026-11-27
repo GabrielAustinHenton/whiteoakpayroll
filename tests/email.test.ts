@@ -60,8 +60,8 @@ describe("login status", () => {
 });
 
 describe("headcount pricing", () => {
-  it("5 people is $25 a month and the 6th person makes it $50", () => {
-    expect(monthlyBill(5).total).toBe(2500);
+  it("5 people is $30 a month and the 6th person makes it $50", () => {
+    expect(monthlyBill(5).total).toBe(3000);
     expect(monthlyBill(6).total).toBe(5000);
   });
 });
