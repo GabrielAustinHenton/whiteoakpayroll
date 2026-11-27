@@ -70,9 +70,12 @@ Staff enter every client's data and run payroll from the **payroll desk** (`/ops
 3. They open the link, choose a password, and land on the payroll desk. To remove someone, delete their
    email from `STAFF_EMAILS` and redeploy.
 
-## Turning on email (logins for staff and client owners)
+## Turning on email (logins, invites and password resets)
 
-Inviting staff or a client's owner emails them a link to choose a password.
+Inviting staff or a client's owner emails them a link to choose a password, and "Forgot password?" on the
+sign-in page emails a one-time reset link (valid for an hour). Until email is set up, invite links are shown
+on screen, but reset links are never shown (that would let anyone reset anyone's password), so resets
+only work once Resend is on.
 Email goes through [Resend](https://resend.com) (free for 3,000 emails a month). Until it is set up,
 the app shows the invite link on screen after you save, so you can send it yourself.
 
