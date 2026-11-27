@@ -2,6 +2,8 @@ import { revealSsn } from "../security/field-crypto";
 import type { Prisma } from "@prisma/client";
 import { db } from "../db";
 import { computePaycheck, toPaycheckRecord, type LineDetail } from "./engine";
+import { activePlan, buildRetirementSubmission, employeeRetirement, priorYearFicaWages } from "./retirement-service";
+import { totalEmployer } from "../retirement";
 import { nextPeriod, type Frequency } from "./periods";
 import { quarterForms, yearForms, type FilingInput } from "./filing-docs";
 import { renderFormPdf } from "../pdf/form-pdf";
@@ -50,6 +52,8 @@ export async function recalculate(payRunId: string) {
   if (run.status !== "DRAFT") throw new Error("Only draft pay runs can change.");
   const year = run.payday.getUTCFullYear();
   const employerSize = await db.employee.count({ where: { companyId: run.companyId, status: "ACTIVE" } });
+  const plan = await activePlan(run.companyId);
+  const priorFica = plan ? await priorYearFicaWages(run.companyId, year) : new Map<string, number>();
 
   for (const line of run.lines) {
     const e = line.employee;
@@ -61,7 +65,8 @@ export async function recalculate(payRunId: string) {
       select: { detail: true },
     });
     const acct = run.company.stateAccounts.find((s) => s.state === e.workState);
-    const detail = computePaycheck(e, {
+    const detail = computePaycheck({ ...e, retirement: employeeRetirement(plan, e, priorFica) }, {
+      payday: iso(run.payday),
       frequency: run.paySchedule.frequency as Frequency,
       hours: line.hours,
       overtimeHours: line.overtimeHours,
@@ -92,13 +97,18 @@ export async function recalculate(payRunId: string) {
   const k = contractor._sum.amountCents ?? 0;
   const gross = lines.reduce((s, l) => s + l.grossCents, 0);
   const er = lines.reduce((s, l) => s + l.employerTaxesCents, 0);
+  // Employer 401(k)/SIMPLE money is on top of wages, so it is part of the cash the run needs.
+  const erRetirement = lines.reduce((s, l) => {
+    const d = l.detail as unknown as LineDetail | null;
+    return s + (d?.retirement ? totalEmployer(d.retirement) : 0);
+  }, 0);
   await db.payRun.update({
     where: { id: payRunId },
     data: {
       grossCents: gross,
       employerTaxesCents: er,
       netCents: lines.reduce((s, l) => s + l.netCents, 0),
-      cashNeededCents: gross + er + k,
+      cashNeededCents: gross + er + k + erRetirement,
     },
   });
 }
@@ -140,6 +150,8 @@ export async function approveAndPay(payRunId: string, actorId: string) {
     });
   });
   await audit(actorId, run.companyId, "payrun.approved", { payRunId, cashNeededCents: run.cashNeededCents });
+  // Retirement provider file for this payday (built now, uploaded or sent from the Retirement page).
+  await buildRetirementSubmission(payRunId);
   await refreshInvoice(run.companyId, iso(run.payday).slice(0, 7));
 }
 

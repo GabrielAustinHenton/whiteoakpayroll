@@ -79,7 +79,7 @@ export function EmployeeForm({ companyId, schedules, e, action, submit, companyS
               </select>
             </Field>
           )}
-          <Field label="401(k) pre-tax (% of pay)"><input name="retirementPct" inputMode="decimal" defaultValue={e?.retirementPretaxRate ? (e.retirementPretaxRate * 100).toString() : ""} /></Field>
+          <Field label="401(k) pre-tax (% of pay)" hint="Once a plan is connected on the Retirement page, set savings there instead"><input name="retirementPct" inputMode="decimal" defaultValue={e?.retirementPretaxRate ? (e.retirementPretaxRate * 100).toString() : ""} /></Field>
           <Field label="Health premium ($/check, pre-tax)"><input name="healthPremium" inputMode="decimal" defaultValue={d(e?.healthPremiumCents)} /></Field>
           {!quick && <Field label="Deposit account number" hint={e?.bankLast4 ? `On file ending ${e.bankLast4}` : "Last 4 kept; deposits simulated"}><input name="bankAccount" inputMode="numeric" /></Field>}
         </div>

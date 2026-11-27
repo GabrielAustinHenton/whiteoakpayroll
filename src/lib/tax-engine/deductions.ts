@@ -13,6 +13,8 @@ export type DeductionKind =
   | "retirement_pretax"
   /** Roth 401(k), and state auto-IRAs (MyCTSavings, OregonSaves), which are Roth IRAs: after tax. */
   | "retirement_roth"
+  /** SIMPLE IRA salary reduction (408(p)): pre-tax like a 401(k); W-2 box 12 code S. */
+  | "simple_ira"
   | "state_auto_ira"
   /** Section 125 cafeteria plan: health, dental, vision premiums. */
   | "section125_health"
@@ -44,6 +46,7 @@ export interface WageBaseFlags {
 
 export const DEDUCTION_TREATMENT: Record<DeductionKind, WageBaseFlags> = {
   retirement_pretax: { federalIncome: true, fica: false, futa: false, stateIncome: true },
+  simple_ira: { federalIncome: true, fica: false, futa: false, stateIncome: true },
   retirement_roth: { federalIncome: false, fica: false, futa: false, stateIncome: false },
   state_auto_ira: { federalIncome: false, fica: false, futa: false, stateIncome: false },
   section125_health: { federalIncome: true, fica: true, futa: true, stateIncome: true },

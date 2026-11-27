@@ -10,6 +10,7 @@ import {
 import { advanceDeduction } from "../payroll/advances";
 import type { PaycheckRecord } from "../filings/records";
 import { PERIODS, type Frequency } from "./periods";
+import { retirementForPaycheck, retirementYtd, totalEmployer, type Election, type PlanConfig, type RetirementLine } from "../retirement";
 
 /**
  * The one place that turns stored app data (employees, company state accounts, prior paychecks)
@@ -34,8 +35,21 @@ export interface EmployeeTaxProfile {
   w4ExtraCents: number;
   w4Exempt: boolean;
   stateW4: unknown;
+  /** Old flat pre-tax 401(k) percent, used only when the company has no retirement plan set up. */
   retirementPretaxRate: number;
   healthPremiumCents: number;
+  /** The company's active retirement plan and this person's election, when one is set up. */
+  retirement?: EmployeeRetirement;
+}
+
+export interface EmployeeRetirement {
+  plan: PlanConfig;
+  election: Election;
+  /** YYYY-MM-DD */
+  birthDate: string;
+  hireDate: string;
+  /** Last year's FICA wages from this employer (Roth catch-up rule). */
+  priorYearFicaWages: Cents;
 }
 
 export interface CompanyStateSettings {
@@ -60,6 +74,8 @@ export interface LineDetail {
   advanceRepayments: { advanceId: string; amount: Cents }[];
   /** Bonus paid on this check (taxed as supplemental wages). */
   supplemental: Cents;
+  /** Retirement plan contributions on this check (employee and employer), when a plan is set up. */
+  retirement?: RetirementLine;
 }
 
 const FREQ: Record<Frequency, PayFrequency> = { WEEKLY: "weekly", BIWEEKLY: "biweekly", SEMIMONTHLY: "semimonthly", MONTHLY: "monthly" };
@@ -170,6 +186,8 @@ export interface PaycheckContext {
   employerSize: number;
   prior: LineDetail[];
   advances: AdvanceForRun[];
+  /** YYYY-MM-DD; needed for retirement plan eligibility and limits. Defaults to today. */
+  payday?: string;
 }
 
 /** Compute one paycheck, including retirement, health and advance repayment deductions. */
@@ -177,7 +195,19 @@ export function computePaycheck(e: EmployeeTaxProfile, ctx: PaycheckContext): Li
   const regular = regularWages(e, ctx.frequency, ctx.hours) + overtimeWages(e, ctx.overtimeHours ?? 0);
   const gross = regular + ctx.bonus;
   const deductions: Deduction[] = [];
-  if (e.retirementPretaxRate > 0) deductions.push({ kind: "retirement_pretax", amount: Math.round(gross * e.retirementPretaxRate) });
+  let retirement: RetirementLine | undefined;
+  if (e.retirement) {
+    const r = retirementForPaycheck({
+      ...e.retirement,
+      gross,
+      payday: ctx.payday ?? new Date().toISOString().slice(0, 10),
+      ytd: retirementYtd(ctx.prior),
+    });
+    retirement = r.line;
+    deductions.push(...r.deductions);
+  } else if (e.retirementPretaxRate > 0) {
+    deductions.push({ kind: "retirement_pretax", amount: Math.round(gross * e.retirementPretaxRate) });
+  }
   if (e.healthPremiumCents > 0) deductions.push({ kind: "section125_health", amount: Math.min(e.healthPremiumCents, gross) });
 
   const { ytd, stateYtd } = ytdFrom(ctx.prior, e.workState);
@@ -221,12 +251,20 @@ export function computePaycheck(e: EmployeeTaxProfile, ctx: PaycheckContext): Li
     // advance_repayment reduces no wage base, so taxes are unchanged; re-run only to re-total.
     result = calculatePaycheck({ ...input, deductions });
   }
-  return { frequency: FREQ[ctx.frequency], result, deductionDetail: deductions, advanceRepayments, supplemental: ctx.bonus };
+  return { frequency: FREQ[ctx.frequency], result, deductionDetail: deductions, advanceRepayments, supplemental: ctx.bonus, ...(retirement ? { retirement } : {}) };
 }
 
 /** Stored lines back into the records the filings library reads. */
 export function toPaycheckRecord(line: { employeeId: string; detail: unknown }, run: { payday: Date; periodStart: Date; periodEnd: Date }): PaycheckRecord {
   const d = line.detail as LineDetail;
   const iso = (x: Date) => x.toISOString().slice(0, 10);
-  return { payday: iso(run.payday), periodStart: iso(run.periodStart), periodEnd: iso(run.periodEnd), employeeId: line.employeeId, result: d.result, deductionDetail: d.deductionDetail };
+  return {
+    payday: iso(run.payday),
+    periodStart: iso(run.periodStart),
+    periodEnd: iso(run.periodEnd),
+    employeeId: line.employeeId,
+    result: d.result,
+    deductionDetail: d.deductionDetail,
+    employerRetirement: d.retirement ? totalEmployer(d.retirement) : 0,
+  };
 }
