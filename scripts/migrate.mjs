@@ -3,6 +3,40 @@
 // Prefers the direct (unpooled) URL for migrations. Accepts the names Vercel's Neon integration
 // creates with prefix DATABASE (recommended), POSTGRES or STORAGE.
 import { execSync } from "node:child_process";
+import { PrismaClient } from "@prisma/client";
+
+// The onboarding records migration was first applied by a preview (which shares this database)
+// as 20261126220000_onboarding_records, then renamed to 20261127050000_onboarding_records before
+// it merged. The renamed copy failed on its first statement ("ssnEncrypted" already exists), so
+// nothing from it ran, and Prisma has refused every deploy since (P3009). The old copy already
+// made everything the new one makes, so record the new one as applied. If the old copy is not
+// there, only clear the failure so the migration runs again.
+async function adoptRenamedOnboardingMigration(url, env) {
+  const oldName = "20261126220000_onboarding_records";
+  const newName = "20261127050000_onboarding_records";
+  const db = new PrismaClient({ datasourceUrl: url });
+  try {
+    const rows = await db.$queryRawUnsafe(
+      `SELECT migration_name, finished_at, rolled_back_at FROM _prisma_migrations WHERE migration_name IN ($1, $2)`,
+      oldName,
+      newName,
+    );
+    const oldApplied = rows.some((r) => r.migration_name === oldName && r.finished_at && !r.rolled_back_at);
+    const newFailed = rows.some((r) => r.migration_name === newName && !r.finished_at && !r.rolled_back_at);
+    const newApplied = rows.some((r) => r.migration_name === newName && r.finished_at && !r.rolled_back_at);
+    if (!newFailed || newApplied) return;
+    execSync(`npx prisma migrate resolve --rolled-back ${newName}`, { stdio: "inherit", env });
+    if (oldApplied) {
+      execSync(`npx prisma migrate resolve --applied ${newName}`, { stdio: "inherit", env });
+      console.log(`Recorded ${newName} as applied: ${oldName} already made those changes.`);
+    }
+  } catch (err) {
+    // No migrations table yet (a new database) or a query problem: leave it to migrate deploy.
+    console.log(`Skipped the onboarding migration check: ${err.message ?? err}`);
+  } finally {
+    await db.$disconnect();
+  }
+}
 
 const e = process.env;
 const url =
@@ -25,6 +59,7 @@ if (!url) {
       // not recorded as failed: nothing to do
     }
   }
+  await adoptRenamedOnboardingMigration(url, env);
   // Several deploys (main plus previews) can migrate the same database at once. Prisma holds an
   // advisory lock and gives up after 10 seconds (P1002), so wait and try again before failing.
   for (let attempt = 1; ; attempt++) {
