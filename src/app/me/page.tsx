@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/auth/session";
 import { Field, Notice, messages, prettyDate, usd } from "@/components/ui";
 import { canOfferAdvance } from "@/lib/payroll/advances";
 import type { LaunchState } from "@/lib/payroll/schedules";
+import { featuresFor } from "@/lib/app/features";
 import { requestAdvance } from "./actions";
 
 export default async function Me({ searchParams }: { searchParams: Promise<Record<string, string>> }) {
@@ -22,11 +23,22 @@ export default async function Me({ searchParams }: { searchParams: Promise<Recor
   }
   const w2s = await db.filing.findMany({ where: { companyId: e.companyId, form: "W-2" }, select: { id: true, period: true, data: true } });
   const mine = w2s.filter((f) => (f.data as { employeeId?: string }).employeeId === e.id);
+  const f = featuresFor(e.company);
   const advancesOk = canOfferAdvance(e.workState as LaunchState);
+  const company = e.company.tradeName ?? e.company.legalName;
   return (
     <>
-      <h1>My pay · {e.company.tradeName ?? e.company.legalName}</h1>
+      <h1>My pay · {company}</h1>
       <Notice error={error} ok={ok} />
+      {f.employeePortal && !e.ssn && e.status !== "TERMINATED" && (
+        <div className="card">
+          <p><b>Finish your new-hire paperwork</b> so {company} can pay you: your details, W-4, state tax form and direct deposit.</p>
+          <a href="/me/details"><button type="button">Start (about 10 minutes)</button></a>
+        </div>
+      )}
+      {f.employeePortal && e.ssn && (
+        <p className="small"><a href="/me/details">Update my address, tax withholding or bank account</a>{e.bankLast4 ? ` · Paid by direct deposit to account ending ${e.bankLast4}` : e.paymentMethod === "CHECK" ? " · Paid by paper check" : ""}</p>
+      )}
       <h2>Paystubs</h2>
       {e.payRunLines.length === 0 ? <p className="muted">No paychecks yet.</p> : (
         <table>
@@ -47,6 +59,7 @@ export default async function Me({ searchParams }: { searchParams: Promise<Recor
       {mine.length === 0 ? <p className="muted">Your W-2 appears here by January 31.</p> : (
         <ul>{mine.map((f) => <li key={f.id}><a href={`/api/filings/${f.id}`}>{f.period} Form W-2 (PDF)</a></li>)}</ul>
       )}
+      {f.advances && <>
       <h2>Payday advance</h2>
       {e.advances.map((a) => (
         <p key={a.id}>{usd(a.principalCents)} requested {prettyDate(a.requestedAt)}: {a.status.toLowerCase()}, {usd(a.repaidCents)} repaid.</p>
@@ -67,6 +80,7 @@ export default async function Me({ searchParams }: { searchParams: Promise<Recor
       ) : (
         <p className="muted">Advances are not available for {e.workState} employees yet.</p>
       )}
+      </>}
     </>
   );
 }

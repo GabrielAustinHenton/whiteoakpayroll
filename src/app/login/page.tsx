@@ -12,6 +12,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
       <form action={login} className="form narrow">
         <Field label="Email"><input name="email" type="email" required autoComplete="email" /></Field>
         <Field label="Password"><input name="password" type="password" required autoComplete="current-password" /></Field>
+        <p className="small"><a href="/forgot">Forgot password?</a></p>
         <button type="submit">Sign in</button>
         <p className="small muted">New company? <a href="/signup">Set up your company</a></p>
         <p className="small muted">White Oak staff: <a href="/admin/setup">create your admin login</a></p>

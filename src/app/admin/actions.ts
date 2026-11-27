@@ -26,3 +26,16 @@ export async function stopAdminEdit(form: FormData) {
   await audit(user.id, companyId || null, "admin.edit_stopped", { by: user.email });
   redirect(companyId ? await sameCompanyReferer(companyId) : "/admin");
 }
+
+/** Switch a company between self-serve and managed by White Oak staff. Logged. */
+export async function setServiceMode(form: FormData) {
+  const user = await requireAdmin();
+  const companyId = str(form.get("companyId"));
+  const mode = str(form.get("serviceMode")) === "MANAGED" ? "MANAGED" : "SELF_SERVE";
+  const c = await db.company.findUnique({ where: { id: companyId } });
+  if (!c) redirect("/admin");
+  // Feature overrides were relative to the old mode's defaults, so they are reset.
+  await db.company.update({ where: { id: companyId }, data: { serviceMode: mode, features: {} } });
+  await audit(user.id, companyId, "admin.service_mode", { from: c!.serviceMode, to: mode, by: user.email });
+  redirect(`/admin/companies/${companyId}?ok=${encodeURIComponent(mode === "MANAGED" ? "Now managed by the payroll desk." : "Now self-serve: the owner runs payroll.")}`);
+}
